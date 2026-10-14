@@ -25,7 +25,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run pytest -q
       - name: CLI 冒烟
-        run: uv run modou version
+        run: uv run modou --help
 
   # ── 门禁 2：薄报告层（预留位） ────────────────────────────────────
   # ui/ 落地（v0.4）前自动跳过；落地后按家族惯例换 pnpm

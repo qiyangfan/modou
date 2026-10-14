@@ -1,0 +1,2 @@
+-- 补充商家备注列（可走 INSTANT）
+ALTER TABLE orders ADD COLUMN remark VARCHAR(200) NOT NULL DEFAULT '' COMMENT '商家备注';

@@ -6,6 +6,8 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
+    "cryptography>=42.0",
+    "pymysql>=1.1",
     "sqlglot>=25.0",
     "typer>=0.12",
 ]
@@ -43,6 +45,10 @@ select = [
     "SIM", # simplify
     "RUF", # ruff 专属
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# typer 的参数默认值必须是 Option()/Argument() 调用，B008 为框架性误报
+"src/modou/cli.py" = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

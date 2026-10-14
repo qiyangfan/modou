@@ -1,0 +1,10 @@
+-- 订单主表
+CREATE TABLE orders (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '订单号',
+    user_id BIGINT UNSIGNED NOT NULL COMMENT '下单用户',
+    amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '订单金额',
+    status TINYINT NOT NULL DEFAULT 0 COMMENT '状态：0 待支付 / 1 已支付',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_user_id (user_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '订单表';
