@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 门禁 1：Python 内核（与 AGENTS.md 门禁命令单源） ──────────────
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          # 3.12 = requires-python 地板，保地板可装；本地开发用 3.13 亦可
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      - name: CLI 冒烟
+        run: uv run modou version
+
+  # ── 门禁 2：薄报告层（预留位） ────────────────────────────────────
+  # ui/ 落地（v0.4）前 hashFiles 为空自动跳过；落地后按家族惯例换 pnpm
+  # （参考 muniu web-check：pnpm/action-setup + package_json_file 指向 ui/）。
+  # Node 版本 = 家族 web 门禁标准：24（muniu/kongming 同款）。
+  ui:
+    if: hashFiles('ui/**') != ''
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run typecheck --if-present
+      - run: npm run lint --if-present
+      - run: npm test --if-present

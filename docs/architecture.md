@@ -1,0 +1,81 @@
+# 架构定稿（北极星）
+
+> 本文记录架构事实供后续读者接手；决策论证见 [adr/](adr/)（索引见
+> [adr/README.md](adr/README.md)），竞品依据见 [research-2026-10.md](research-2026-10.md)，
+> 目标与验收判据见 [goals.md](goals.md)，红线见 [openspec/project.md](../openspec/project.md)（宪法）。
+
+## 定位一句话
+
+把平台级的数据库工程化能力（审核、验收、优化、洞察），装进**不需要改任何流程的本地工具**里；
+一切结论由影子库回放实证给出（ADR-0001/0003）。
+
+## 内核三件套（四车道共用）
+
+```
+introspect（内省）        replay（影子回放）            report（结构化报告）
+线上元数据快照采集   →    同版本容器 MySQL 灌入快照  →   统一格式（人读文本 + 机读 JSON）
+information_schema       回放变更集 = 期望态            确定性退出码（CI 卡点）
+SHOW CREATE TABLE        建建议索引重跑 EXPLAIN         建议"实测提升/未验证"两级状态
+```
+
+- 变更车道与优化车道**复用同一套影子库基建**——边际成本递减的来源（ADR-0001）。
+- 期望态一律回放推导，DDL 解析只作预警（ADR-0004）。
+
+## 模块地图（src/modou/）
+
+```
+cli.py            typer 入口：子命令注册，零业务逻辑
+changeset/        变更集发现、manifest 校验、排序、合并打包、破坏性预警     [v0.1]
+snapshot/         只读快照采集与灌入（含版本/字符集元信息）                 [v0.1]
+replay/           影子库生命周期（拉起/灌入/回放/销毁）                     [v0.1]
+diff/             结构化 diff 与三方验收（漏执行/错执行/历史漂移）           [v0.1]
+report/           统一报告格式：按库分组的稳定契约（v0.1 起冻结）            [v0.1]
+optimize/         采集 → 规则初筛 → AI 诊断 → 影子库实证复核                 [v0.2]
+server/           MCP 表面：与 CLI 子命令 1:1（FastMCP 薄封装）              [v0.3]
+lint/             规则引擎（SOAR 高频反模式子集起步，可共建）                 [v0.4]
+patrol/           漂移巡检、未用索引、慢日志指纹聚合、锁风险建议             [v0.4]
+ui/（独立目录）    本地薄报告层（localhost，无登录无部署）                    [v0.4]
+```
+
+## 四车道 × 三表面
+
+| 车道 | 命令域 | 共用的内核能力 |
+|---|---|---|
+| 变更验收 | `pack` / `verify` | introspect + replay + report |
+| SQL 优化 | `optimize` | introspect + replay（建索引实测）+ report |
+| 规则审核 | `lint` | 纯静态（sqlglot），不依赖影子库 |
+| 漂移洞察 | `patrol` | introspect + report（定时化） |
+
+表面：CLI 为体、MCP 为面（1:1 映射子命令）、本地 Web 为薄报告层（ADR-0002）。
+
+## 变更车道核心流程（v0.1 范围）
+
+```
+开发侧                                运维侧
+──────                                ──────
+changeset/ 目录（V 命名 + manifest）
+  │ modou pack ──→ 合并脚本 + 清单校验 + 破坏性预警 ──→ 交付运维
+  │                                                        │ 执行
+执行前快照（运维跑只读导出脚本）──→ 本地影子库灌入 → 回放 = 期望态
+执行后快照 ──────────────────────→ 实际态
+  │ modou verify ──→ 三方 diff（期望/基线/实际）→ 漏执行·错执行·历史漂移报告
+```
+
+- DML 数据订正不做全表比对，行数 + checksum 抽查（宪法口径）。
+- 退出码契约：0=全部一致，1=存在差异结论，2=环境或输入错误；多库聚合取最严重档。
+
+## 门禁与 CI
+
+本地门禁与 CI 同款单源（AGENTS.md 同文）：`uv run ruff format --check .`、
+`uv run ruff check .`、`uv run pytest`。CI（`.github/workflows/ci.yml`）两个 job：
+
+- `core`：Python 3.12（地板版本）+ uv 缓存，跑全量门禁；
+- `ui`：**Node 24**（家族 web 门禁标准版本，muniu/kongming 同款），`ui/` 目录落地前
+  `hashFiles` 条件自动跳过，落地后接管薄报告层的 typecheck/lint/test。
+
+## 已知风险（原型阶段须最先验证）
+
+1. **快照格式与灌入保真**：字符集/collation 继承、存储过程、触发器、生成列的 round-trip
+   是否无损——出现假差异先怀疑快照失真，再怀疑变更集；
+2. **MySQL 实证成本**：无 HypoPG，影子库真建索引对大表是否可行（必要时采样子集，ADR-0005）；
+3. **Atlas 下压风险**：若其补"验收模式"——应对是 MySQL 纵深 + 中文生态 + 它没有的优化/洞察车道。

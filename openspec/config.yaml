@@ -1,0 +1,39 @@
+schema: spec-driven
+
+context: |
+  墨斗（modou）——数据库工程化的本地层：变更验收 · SQL 优化 · 规则审核 · 漂移洞察。
+  一切结论由影子库回放实证给出，不改造用户发布流程，不部署平台。
+  技术栈（docs/architecture.md 北极星锁定，偏离须 ADR）：
+  - Python 3.12+（uv 管理，typer CLI + FastMCP），src 布局
+  - sqlglot 为唯一 SQL 解析器（仅用于预警与 lint，结论不依赖解析）
+  - 影子库：同版本容器 MySQL（本地 podman/testcontainers），快照灌入 + 回放
+  - 方言：MySQL 先行（ADR-0005），PostgreSQL 次之
+  架构决策见 docs/adr/（ADR-0001~0008）；竞品依据见 docs/research-2026-10.md。关键红线：
+  - 确定性代码当裁判，AI 只当顾问；AI 建议未过实证关不得进报告（ADR-0003）
+  - 期望态只能由回放推导，DDL 解析仅作预警（ADR-0004）
+  - 零平台化：无常驻服务、无账号体系、报告 UI 仅 localhost（ADR-0002）
+  - 多实例多库是默认假设（ADR-0008）
+  注释、文档、提交信息均使用中文；日志文本使用英文。
+
+rules:
+  proposal:
+    - 每份提案必须包含"不做清单"（Non-goals）
+    - 提案须引用受影响的 ADR 编号
+    - 禁止"顺手扩大范围"：一个 change 一个车道
+  tasks:
+    - 任务粒度控制在两小时以内
+    - 回放/diff/优化类任务必须测试先行：先写失败测试（影子库 fixture 或单测）再实现
+    - 涉及 AI 建议输出的任务必须包含"实证关"验收项（未过实证的建议标"未验证"）
+  specs:
+    - Requirement 用 SHALL/SHOULD；Scenario 用 GIVEN/WHEN/THEN
+    - spec 只写行为，不绑定实现（不出现框架名/库名）；实现选择属于 ADR
+    - 涉及结论输出的 Requirement 必须定义确定性退出码语义
+
+operations:
+  apply:
+    guidance:
+      - 完成后必须验证：uv run ruff format --check . && uv run ruff check . && uv run pytest 全绿
+      - 行为变化附手工冒烟记录；涉及回放/diff 行为的改动附影子库实证记录
+  archive:
+    guidance:
+      - 归档前核对 spec deltas 已 sync 进 specs/，涉及 ADR 须已更新
