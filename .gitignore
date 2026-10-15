@@ -5,6 +5,10 @@ __pycache__/
 dist/
 build/
 
+# 前端（依赖目录忽略；ui/dist 构建产物不入库——Python 包经 hatch force-include
+# 打包时装入，构建前置 `cd ui && npm run build`（CI 内核门禁自带构建步骤））
+ui/node_modules/
+
 # 虚拟环境与锁产物
 .venv/
 
@@ -18,3 +22,4 @@ build/
 
 # 系统
 .DS_Store
+

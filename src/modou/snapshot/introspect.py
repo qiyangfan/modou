@@ -19,6 +19,7 @@ import pymysql.cursors
 from modou.db import MysqlParams, quote_ident
 from modou.replay.env import unsupported_version_errors
 from modou.snapshot.model import (
+    FORMAT_VERSION,
     CheckDef,
     ColumnDef,
     DatabaseInventory,
@@ -29,7 +30,9 @@ from modou.snapshot.model import (
     Snapshot,
     SnapshotMeta,
     TableDef,
+    TableSample,
 )
+from modou.snapshot.sample import NoPrimaryKeyError, build_sample_sql, json_safe_value
 
 # 剥离 SHOW CREATE 输出中的 DEFINER 子句：灌入影子库后服务器会重写 DEFINER 为灌入者，
 # 不剥离将产生假差异（HANDOFF 已知坑）。
@@ -65,8 +68,10 @@ def _strip_runtime_options(create_options: str) -> str:
     return _AUTO_INCREMENT_OPTION_PATTERN.sub("", create_options or "").strip()
 
 
-def read_database_inventory(conn: pymysql.connections.Connection, db_name: str) -> DatabaseInventory:
-    """读取单个库的完整结构清单。
+def read_database_inventory(
+    conn: pymysql.connections.Connection, db_name: str, *, sample_rows: int | None = None
+) -> DatabaseInventory:
+    """读取单个库的完整结构清单；sample_rows 给定时附带每表采样数据（format v2）。
 
     权限不足时直接抛出 MySQL 错误（fail-loud）：静默跳过对象会让后续 diff
     产出「漏执行」假结论，比采集失败危害更大。库级 warnings 仅承载非致命提示。
@@ -84,12 +89,14 @@ def read_database_inventory(conn: pymysql.connections.Connection, db_name: str) 
         inventory.charset, inventory.collation = str(row[0]), str(row[1])
 
         cursor.execute(
-            "SELECT table_name, engine, table_collation, table_comment, create_options "
+            "SELECT table_name, engine, table_collation, table_comment, create_options, table_rows "
             "FROM information_schema.TABLES WHERE table_schema = %s AND table_type = 'BASE TABLE'",
             (db_name,),
         )
         table_rows = cursor.fetchall()
-        for table_name, engine, table_collation, table_comment, create_options in table_rows:
+        estimated_by_table: dict[str, int | None] = {}
+        for table_name, engine, table_collation, table_comment, create_options, estimated_rows in table_rows:
+            estimated_by_table[str(table_name)] = None if estimated_rows is None else int(estimated_rows)
             inventory.tables[str(table_name)] = TableDef(
                 name=str(table_name),
                 engine=str(engine or ""),
@@ -104,6 +111,12 @@ def read_database_inventory(conn: pymysql.connections.Connection, db_name: str) 
             table_def.indexes = _read_indexes(cursor, db_name, table_def.name)
             table_def.foreign_keys = _read_foreign_keys(cursor, db_name, table_def.name)
             table_def.check_constraints = _read_check_constraints(cursor, db_name, table_def.name)
+
+        if sample_rows is not None and sample_rows > 0:
+            for table_def in inventory.tables.values():
+                table_def.sample = _sample_table(
+                    cursor, db_name, table_def, limit=sample_rows, estimated_rows=estimated_by_table.get(table_def.name)
+                )
 
         cursor.execute(
             "SELECT table_name FROM information_schema.VIEWS WHERE table_schema = %s ORDER BY table_name",
@@ -147,11 +160,51 @@ def read_database_inventory(conn: pymysql.connections.Connection, db_name: str) 
     return inventory
 
 
-def capture_snapshot(params: MysqlParams, database_names: list[str]) -> Snapshot:
+def _sample_table(
+    cursor: pymysql.cursors.Cursor,
+    db_name: str,
+    table: TableDef,
+    *,
+    limit: int,
+    estimated_rows: int | None,
+) -> TableSample:
+    """对单表执行确定性采样；无主键表记录跳过口径而非失败（结构与数据并重）。"""
+    estimated = estimated_rows
+    try:
+        # 多取一行：恰好 limit 行的未截断表不得误标 row_limit_reached（探测见下）
+        sql = build_sample_sql(db_name, table, limit=limit + 1)
+    except NoPrimaryKeyError as exc:
+        return TableSample(
+            columns=[],
+            rows=[],
+            sampled_rows=0,
+            estimated_rows=estimated,
+            method="skipped_no_primary_key",
+            note=str(exc),
+        )
+    cursor.execute(sql)
+    names = [str(desc[0]) for desc in cursor.description] if cursor.description else []
+    # 多取一行探测截断：恰好 limit 行的未截断表不得误标 row_limit_reached
+    rows = [[json_safe_value(value) for value in row] for row in cursor.fetchall()]
+    reached = len(rows) > limit
+    rows = rows[:limit]
+    method = "primary_key_asc_row_limit_reached" if reached else "primary_key_asc"
+    return TableSample(
+        columns=names,
+        rows=rows,
+        sampled_rows=len(rows),
+        estimated_rows=estimated,
+        method=method,
+        note="",
+    )
+
+
+def capture_snapshot(params: MysqlParams, database_names: list[str], *, sample_rows: int | None = None) -> Snapshot:
     """对目标实例的指定库清单做一次只读采集。
 
     版本低于采集支持地板（8.0）时显式拒绝：内省查询依赖 8.0+ 专有元数据，
-    老版本只会在查询期报 1054 一类晦涩错误。
+    老版本只会在查询期报 1054 一类晦涩错误。sample_rows 给定时为采样模式
+    （format v2，附采样数据节），供 optimize 影子实证使用。
     """
     conn = params.connect()
     try:
@@ -160,13 +213,13 @@ def capture_snapshot(params: MysqlParams, database_names: list[str]) -> Snapshot
         if version_errors:
             raise ValueError("; ".join(version_errors))
         snapshot = Snapshot(
-            format_version=1,
+            format_version=FORMAT_VERSION,
             tool_version=_tool_version(),
             captured_at=_utc_now(),
             meta=meta,
         )
         for db_name in database_names:
-            snapshot.databases[db_name] = read_database_inventory(conn, db_name)
+            snapshot.databases[db_name] = read_database_inventory(conn, db_name, sample_rows=sample_rows)
         return snapshot
     finally:
         conn.close()

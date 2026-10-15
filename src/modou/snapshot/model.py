@@ -1,9 +1,11 @@
-"""快照数据模型：导出格式的唯一事实源（format_version=1，契约冻结，见 docs/formats.md）。
+"""快照数据模型：导出格式的唯一事实源（format_version=2，v1 向后可读，见 docs/formats.md）。
 
 设计要点：
 - 结构化字段（列/索引/约束）供三方 diff 逐维对比，DDL 原文仅供灌入与人工排查；
 - 内省侧已对 DDL 归一化（剥离 DEFINER），因此本模型不再做二次归一；
-- 表选项不比较 AUTO_INCREMENT 计数器（运行时状态，非结构）。
+- 表选项不比较 AUTO_INCREMENT 计数器（运行时状态，非结构）；
+- v2 新增可选采样数据节（TableSample）：结构快照照旧（sample=None），
+  采样快照供 optimize 影子实证使用（空表 EXPLAIN 无代价差异，见 design）。
 """
 
 from __future__ import annotations
@@ -11,7 +13,21 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+# v1=纯结构（冻结契约）；v2=结构 + 可选采样数据。新版本必须保持向后可读。
+SUPPORTED_FORMAT_VERSIONS = (1, 2)
+
+
+@dataclass
+class TableSample:
+    """表的采样数据节：确定性样本集 + 实证环境数据规模元信息。"""
+
+    columns: list[str] = field(default_factory=list)
+    rows: list[list] = field(default_factory=list)
+    sampled_rows: int = 0
+    estimated_rows: int | None = None
+    method: str = "primary_key_asc"  # skipped_no_primary_key / row_limit_reached 等口径随行
+    note: str = ""
 
 
 @dataclass
@@ -72,6 +88,7 @@ class TableDef:
     indexes: list[IndexDef] = field(default_factory=list)
     foreign_keys: list[ForeignKeyDef] = field(default_factory=list)
     check_constraints: list[CheckDef] = field(default_factory=list)
+    sample: TableSample | None = None
 
 
 @dataclass
@@ -117,8 +134,21 @@ class Snapshot:
 
 
 def snapshot_to_json(snapshot: Snapshot) -> str:
-    """序列化为导出格式（缩进 2 空格，人可读、可 diff）。"""
-    return json.dumps(asdict(snapshot), ensure_ascii=False, indent=2) + "\n"
+    """序列化为导出格式（缩进 2 空格，人可读、可 diff）。
+
+    allow_nan=False：NaN/Infinity 会产出非 RFC 8259 的 JSON（下游 json.loads
+    各实现行为不一），宁可采集期响亮失败。
+    """
+    return json.dumps(asdict(snapshot), ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+
+
+def _require_int(value: object, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError(f"snapshot field {where} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"snapshot field {where} must be an integer") from exc
 
 
 def _require_dict(value: object, where: str) -> dict:
@@ -136,12 +166,16 @@ def _require_list(value: object, where: str) -> list:
 
 
 def snapshot_from_json(text: str) -> Snapshot:
-    """从导出格式反序列化；格式版本不匹配或容器结构非法即拒绝（防静默误读）。"""
+    """从导出格式反序列化；格式版本不匹配或容器结构非法即拒绝（防静默误读）。
+
+    v1/v2 均可读（向后可读契约）：v1 无 sample 键 → sample=None。
+    """
     raw = json.loads(text)
     raw = _require_dict(raw, "<root>")
-    if raw.get("format_version") != FORMAT_VERSION:
+    if raw.get("format_version") not in SUPPORTED_FORMAT_VERSIONS:
         raise ValueError(
-            f"unsupported snapshot format_version: {raw.get('format_version')!r} (expected {FORMAT_VERSION})"
+            f"unsupported snapshot format_version: {raw.get('format_version')!r} "
+            f"(supported: {', '.join(str(v) for v in SUPPORTED_FORMAT_VERSIONS)})"
         )
     meta = SnapshotMeta(**_require_dict(raw["meta"], "meta"))
     databases: dict[str, DatabaseInventory] = {}
@@ -178,6 +212,22 @@ def snapshot_from_json(text: str) -> Snapshot:
                     t_raw["check_constraints"], f"databases[{db_name!r}].tables[{t_name!r}].check_constraints"
                 )
             ]
+            sample_raw = t_raw.get("sample")
+            sample: TableSample | None = None
+            if sample_raw is not None:
+                sample_dict = _require_dict(sample_raw, f"databases[{db_name!r}].tables[{t_name!r}].sample")
+                sample = TableSample(
+                    columns=list(_require_list(sample_dict.get("columns"), f"{t_name!r}.sample.columns")),
+                    rows=list(_require_list(sample_dict.get("rows"), f"{t_name!r}.sample.rows")),
+                    sampled_rows=int(_require_int(sample_dict.get("sampled_rows"), f"{t_name!r}.sample.sampled_rows")),
+                    estimated_rows=(
+                        None
+                        if sample_dict.get("estimated_rows") is None
+                        else _require_int(sample_dict.get("estimated_rows"), f"{t_name!r}.sample.estimated_rows")
+                    ),
+                    method=str(sample_dict.get("method", "")),
+                    note=str(sample_dict.get("note", "")),
+                )
             tables[t_name] = TableDef(
                 name=t_raw["name"],
                 engine=t_raw["engine"],
@@ -189,6 +239,7 @@ def snapshot_from_json(text: str) -> Snapshot:
                 indexes=indexes,
                 foreign_keys=foreign_keys,
                 check_constraints=checks,
+                sample=sample,
             )
         object_fields = {
             "views": db_raw["views"],

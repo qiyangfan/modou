@@ -21,7 +21,7 @@ from modou.diff.threeway import KIND_DRIFT, KIND_MISSING, KIND_WRONG
 from modou.replay.splitter import split_statements
 from modou.report.render import EXIT_DIFF, EXIT_ERROR, EXIT_OK
 from modou.snapshot.introspect import capture_snapshot
-from tests.integration.conftest import unique_db
+from tests.conftest import unique_db
 
 CREATE_ORDERS = (
     "CREATE TABLE orders (\n"

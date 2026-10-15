@@ -15,8 +15,14 @@ dependencies = [
 [project.scripts]
 modou = "modou.cli:app"
 
+[project.optional-dependencies]
+mcp = [
+    "fastmcp>=4,<5",
+]
+
 [dependency-groups]
 dev = [
+    "fastmcp>=4,<5",
     "pytest>=8.0",
     "ruff>=0.6",
 ]
@@ -27,6 +33,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/modou"]
+
+# 前端构建产物随 Python 包分发：运行期零 Node 依赖（v0.4c design §2）
+[tool.hatch.build.targets.wheel.force-include]
+"ui/dist" = "src/modou/ui/dist"
 
 [tool.ruff]
 line-length = 120

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import typer
 
-from modou.cli import _resolve_params
+from modou.params import resolve_params as _resolve_params
 
 
 def test_dsn_explicit_empty_password_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:

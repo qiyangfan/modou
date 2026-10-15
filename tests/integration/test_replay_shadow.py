@@ -9,7 +9,7 @@ import pymysql.connections
 from modou.changeset.pack import pack_changeset
 from modou.replay.replay import replay_statements
 from modou.replay.splitter import split_statements
-from tests.integration.conftest import unique_db
+from tests.conftest import unique_db
 
 
 def make_changeset(tmp_path: Path, files: dict[str, str]) -> Path:

@@ -1,0 +1,23 @@
+{
+  "name": "modou-ui",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "description": "墨斗本地薄报告层：渲染 verify/optimize/lint/patrol 报告（仅 localhost，只读）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "npm run build && vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "eslint": "^9.0.0",
+    "jsdom": "^27.0.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.0.0",
+    "vite": "^8.0.0",
+    "vitest": "^4.0.0"
+  }
+}

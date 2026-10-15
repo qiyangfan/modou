@@ -13,7 +13,7 @@ import pymysql.connections
 
 from modou.snapshot.introspect import capture_snapshot
 from modou.snapshot.restore import restore_snapshot
-from tests.integration.conftest import unique_db
+from tests.conftest import unique_db
 
 RICH_SCHEMA = """
 CREATE TABLE t_inherit (

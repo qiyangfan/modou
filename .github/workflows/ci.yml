@@ -15,11 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - uses: astral-sh/setup-uv@v10.0.1
         with:
           # 3.12 = requires-python 地板，保地板可装；本地开发用 3.13 亦可
           python-version: "3.12"
           enable-cache: true
+      # ui/dist 是 hatch force-include 的硬前置（uv sync 走 editable 构建同路径），
+      # 内核门禁在安装前先产出前端构建产物（产物不入库，见 .gitignore 注释）
+      - name: Build UI assets
+        run: npm ci --prefix ui && npm run build --prefix ui
       - run: uv sync --frozen
       - run: uv run ruff format --check .
       - run: uv run ruff check .
