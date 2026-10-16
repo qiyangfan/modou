@@ -3,6 +3,7 @@
 import subprocess
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 from typer.testing import CliRunner
 
@@ -163,3 +164,134 @@ def test_capture_connection_failure_exit_two(tmp_path: Path) -> None:
     )
     assert result.exit_code == 2
     assert "snapshot capture failed" in result.output
+
+
+def test_capture_report_json_is_kernel_summary(tmp_path: Path, monkeypatch) -> None:
+    """证据原语单一事实源：CLI --report-json 与内核 snapshot_summary 逐字节同构。"""
+    import json
+
+    from modou.snapshot.model import DatabaseInventory
+    from modou.snapshot.summary import snapshot_summary
+
+    captured = Snapshot(
+        format_version=2,
+        tool_version="test",
+        captured_at="2026-10-16T00:00:00+00:00",
+        meta=SnapshotMeta("8.4.11", "MySQL", "utf8mb4", "utf8mb4_0900_ai_ci", 0, ""),
+        databases={"shop": DatabaseInventory(name="shop", charset="utf8mb4", collation="")},
+    )
+    monkeypatch.setattr("modou.cli.capture_to_file", lambda *args, **kwargs: captured)
+    output = tmp_path / "s.json"
+    report = tmp_path / "summary.json"
+    result = runner.invoke(
+        app,
+        ["snapshot", "capture", "-d", "shop", "-o", str(output), "--report-json", str(report), "--password", "x"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload == snapshot_summary(captured)
+
+
+class TestVerifyAiAttribution:
+    """verify 失败归因的 CLI 接线：配置驱动、观点进报告、退出码免疫。"""
+
+    def test_unconfigured_no_ai_call_no_section(self, tmp_path, monkeypatch) -> None:
+        for key in ("MOUDO_AI_BASE_URL", "MOUDO_AI_API_KEY", "MOUDO_AI_MODEL"):
+            monkeypatch.delenv(key, raising=False)
+
+        def must_not_call(*args, **kwargs):
+            raise AssertionError("AI attribution must not run without BYOK config")
+
+        monkeypatch.setattr("modou.ai.lane_verify.attribute_findings", must_not_call)
+        changeset = make_changeset(tmp_path / "cs", {"V01__a.sql": "SELECT 1;"}, ["V01__a.sql"])
+        baseline = tmp_path / "b.json"
+        baseline.write_text(_valid_snapshot_json(), encoding="utf-8")
+
+        class FakeOutcome:
+            exit_code = 1
+            report_json: ClassVar[dict] = {
+                "report_version": 1,
+                "exit_code": 1,
+                "databases": {"shop": [{"object_name": "orders"}]},
+            }
+
+            def render(self):
+                return "墨斗验收报告"
+
+        # 桩掉容器回放：让 AI 分支真实可达（有发现），未配置时 tripwire 必须不被触发
+        monkeypatch.setattr("modou.cli.run_verify", lambda *args, **kwargs: FakeOutcome())
+        # tripwire 有效性：AI 归因在报告落盘之前，--report-json 一旦缺席即说明命令中途夭折
+        report = tmp_path / "verify-report.json"
+        result = runner.invoke(
+            app,
+            [
+                "verify",
+                str(changeset),
+                "--baseline",
+                str(baseline),
+                "--after",
+                str(baseline),
+                "--report-json",
+                str(report),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "AI 观点" not in result.output
+        assert report.exists(), "tripwire fired: verify aborted before writing report (AI ran unconfigured)"
+        import json
+
+        assert "ai_opinions" not in json.loads(report.read_text(encoding="utf-8"))
+
+    def test_configured_attaches_opinions_exit_code_immunity(self, tmp_path, monkeypatch) -> None:
+        import json
+
+        from modou.report.opinions import AiOpinion
+
+        monkeypatch.setenv("MOUDO_AI_BASE_URL", "https://api.example.com/v1")
+        monkeypatch.setenv("MOUDO_AI_API_KEY", "k")
+        monkeypatch.setenv("MOUDO_AI_MODEL", "glm-4.7")
+        captured: dict = {}
+
+        def fake_attribute(report_json, changeset_dir, baseline, *, config, **kwargs):
+            captured["exit_code"] = report_json["exit_code"]
+            captured["model"] = config.model
+            return [AiOpinion(lane="verify", subject="report", opinion="漏执行疑似运维侧跳过 V03。", model="glm-4.7")]
+
+        monkeypatch.setattr("modou.ai.lane_verify.attribute_findings", fake_attribute)
+
+        # 退出码 1 的真实场景由影子集成覆盖；此处用 monkeypatch run_verify 造确定性结论
+        class FakeOutcome:
+            exit_code = 1
+            report_json: ClassVar[dict] = {
+                "report_version": 1,
+                "exit_code": 1,
+                "databases": {"shop": [{"object_name": "orders"}]},
+            }
+
+            def render(self):
+                return "墨斗验收报告"
+
+        monkeypatch.setattr("modou.cli.run_verify", lambda *args, **kwargs: FakeOutcome())
+        changeset = make_changeset(tmp_path / "cs", {"V01__a.sql": "SELECT 1;"}, ["V01__a.sql"])
+        baseline = tmp_path / "b.json"
+        baseline.write_text(_valid_snapshot_json(), encoding="utf-8")
+        out = tmp_path / "report.json"
+        result = runner.invoke(
+            app,
+            [
+                "verify",
+                str(changeset),
+                "--baseline",
+                str(baseline),
+                "--after",
+                str(baseline),
+                "--report-json",
+                str(out),
+            ],
+        )
+        assert result.exit_code == 1  # 退出码仍由确定性结论决定
+        assert captured["exit_code"] == 1 and captured["model"] == "glm-4.7"
+        report = json.loads(out.read_text(encoding="utf-8"))
+        assert report["ai_opinions"][0]["subject"] == "report"
+        assert report["exit_code"] == 1
+        assert "AI 观点" in result.output and "未实证" in result.output

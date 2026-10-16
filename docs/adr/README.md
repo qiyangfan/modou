@@ -13,3 +13,4 @@
 | [ADR-0006](ADR-0006-tech-stack-python-uv-sqlglot.md) | 技术栈：Python 3.12+ / uv / sqlglot | 接受 |
 | [ADR-0007](ADR-0007-changeset-convention-flyway.md) | 变更集规范向 Flyway 靠拢 | 接受 |
 | [ADR-0008](ADR-0008-multi-instance-by-default.md) | 默认多实例多库 | 接受 |
+| [ADR-0009](ADR-0009-ai-analyst-hybrid-architecture.md) | AI 当分析师——确定性工程 × AI 混合架构 | 接受（部分取代 ADR-0003 的 AI 职责面） |

@@ -137,3 +137,72 @@ class TestSlowlogCli:
         payload = json.loads(out.read_text(encoding="utf-8"))
         assert payload["report_kind"] == "patrol_slowlog"
         assert payload["entries_parsed"] == 1
+
+
+class TestPatrolSummarizeCli:
+    """patrol summarize：跨信号 digest + AI 叙事（配置驱动、退出码取最严重档）。"""
+
+    def _drift_json(self, tmp_path):
+        f = tmp_path / "drift.json"
+        f.write_text(
+            json.dumps(
+                {
+                    "report_kind": "patrol_drift",
+                    "report_version": 1,
+                    "exit_code": 1,
+                    "summary": {"added": 1, "removed": 0, "changed": 0, "databases_with_findings": 1},
+                    "databases": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return f
+
+    def test_requires_at_least_one_input(self, tmp_path) -> None:
+        result = runner.invoke(app, ["patrol", "summarize"])
+        assert result.exit_code == 2
+
+    def test_kind_mismatch_exit_two(self, tmp_path) -> None:
+        wrong = tmp_path / "w.json"
+        wrong.write_text(json.dumps({"report_kind": "lint", "report_version": 1}), encoding="utf-8")
+        result = runner.invoke(app, ["patrol", "summarize", "--drift", str(wrong)])
+        assert result.exit_code == 2
+        assert "report_kind" in result.output
+
+    def test_digest_without_ai_has_no_opinions(self, tmp_path, monkeypatch) -> None:
+        for key in ("MOUDO_AI_BASE_URL", "MOUDO_AI_API_KEY", "MOUDO_AI_MODEL"):
+            monkeypatch.delenv(key, raising=False)
+
+        def must_not_call(*args, **kwargs):
+            raise AssertionError("AI narrative must not run without BYOK config")
+
+        monkeypatch.setattr("modou.ai.lane_patrol.narrativize", must_not_call)
+        drift = self._drift_json(tmp_path)
+        out = tmp_path / "summary.json"
+        result = runner.invoke(app, ["patrol", "summarize", "--drift", str(drift), "--report-json", str(out)])
+        assert result.exit_code == 1  # 取最严重档：drift 有发现
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["report_kind"] == "patrol_summary"
+        assert "ai_opinions" not in payload
+        assert "AI 观点" not in result.output
+
+    def test_ai_narrative_attached_exit_code_immunity(self, tmp_path, monkeypatch) -> None:
+        from modou.report.opinions import AiOpinion
+
+        monkeypatch.setenv("MOUDO_AI_BASE_URL", "https://api.example.com/v1")
+        monkeypatch.setenv("MOUDO_AI_API_KEY", "k")
+        monkeypatch.setenv("MOUDO_AI_MODEL", "glm-4.7")
+
+        def fake_narrative(summary, *, config, **kwargs):
+            assert config.model == "glm-4.7"
+            return [AiOpinion(lane="patrol", subject="cross-signal", opinion="漂移与慢日志相互印证。", model="glm-4.7")]
+
+        monkeypatch.setattr("modou.ai.lane_patrol.narrativize", fake_narrative)
+        drift = self._drift_json(tmp_path)
+        out = tmp_path / "summary.json"
+        result = runner.invoke(app, ["patrol", "summarize", "--drift", str(drift), "--report-json", str(out)])
+        assert result.exit_code == 1
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["ai_opinions"][0]["subject"] == "cross-signal"
+        assert payload["exit_code"] == 1
+        assert "AI 观点" in result.output and "未实证" in result.output

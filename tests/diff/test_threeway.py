@@ -129,6 +129,39 @@ def test_wrong_execution_column_type_differs() -> None:
     assert conclusions[0].kind == KIND_MISSING  # 实际仍停在基线 → 变更未生效，归漏执行
 
 
+def test_column_collation_difference_rendered() -> None:
+    """collation 参与判差就必须参与渲染：两侧渲染同文时读者无法理解差异何在。
+
+    真链场景：链脚本建表不钉 collation（继承库默认），交付 dump 产物固化了
+    生成环境默认——verify 判 59 表「错执行（列、表选项）」但列渲染同文。
+    """
+    e = db(
+        tables={"t1": table("t1", columns=[replace(column("plant_id", "varchar(64)"), collation="utf8mb4_unicode_ci")])}
+    )
+    a = db(
+        tables={"t1": table("t1", columns=[replace(column("plant_id", "varchar(64)"), collation="utf8mb4_0900_ai_ci")])}
+    )
+    conclusions = three_way_diff(None, e, a)
+    assert conclusions[0].kind == KIND_WRONG
+    assert conclusions[0].dimensions == ["columns"]
+    detail = conclusions[0].details[0]
+    assert "collation=utf8mb4_unicode_ci" in detail.expected
+    assert "collation=utf8mb4_0900_ai_ci" in detail.actual
+
+
+def test_column_comment_difference_rendered() -> None:
+    """comment 同为参与比较的字段，渲染必须可区分（真链场景：执行事故把中文注释双重编码固化）。"""
+    e = db(tables={"t1": table("t1", columns=[replace(column("plant_id", "varchar(64)"), comment="电站标识")])})
+    a = db(tables={"t1": table("t1", columns=[replace(column("plant_id", "varchar(64)"), comment="çµç«æ è¯")])})
+    conclusions = three_way_diff(None, e, a)
+    assert conclusions[0].kind == KIND_WRONG
+    detail = conclusions[0].details[0]
+    # !r 渲染把乱码中的不可打印字节转义为 \xNN 字面量，字节形态对读者无歧义
+    assert "comment='电站标识'" in detail.expected
+    assert r"\x94" in detail.actual
+    assert detail.expected != detail.actual
+
+
 def test_new_table_options_mismatch_is_wrong_execution() -> None:
     """回归：新建表（基线无此表）且表选项与期望不符时，应归为错执行而非崩溃。
 

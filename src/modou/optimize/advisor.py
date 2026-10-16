@@ -1,67 +1,34 @@
-"""AI 顾问层：BYOK 可选端点，候选生成与解释（ADR-0003：AI 只当顾问）。
+"""优化车道 · AI 候选生成（内置通道的 optimize 侧）：提示词、候选解析与失败降级。
 
-红线落地（design §3）：
-- 配置三元组（MOUDO_AI_BASE_URL / MOUDO_AI_API_KEY / MOUDO_AI_MODEL）缺一即视为
-  未配置，不发起任何网络请求；
-- 发送载荷仅含 SQL 文本与 schema 摘要（表/列/索引元数据），绝不含采样数据行；
-- 超时/解析失败/网络异常一律降级为空候选（fail-safe），不阻塞报告。
+职责面见 ADR-0009（AI 当分析师），实证关与退出码条款见 ADR-0003（继续有效）。
+BYOK 客户端已收拢进 modou.ai.client（v0.5，行为不变）；本模块只保留优化车道
+的提示词与候选结构化解析。配置三元组缺一即未配置（零网络）；发送载荷仅含
+SQL 文本与 schema 元数据；失败一律降级为空候选（fail-safe，不阻塞报告）。
 """
 
 from __future__ import annotations
 
 import json
-import re
-import urllib.error
-import urllib.request
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from typing import Any
 
+from modou.ai.client import (
+    DEFAULT_TIMEOUT_SECONDS,
+    ENV_API_KEY,
+    ENV_BASE_URL,
+    ENV_MODEL,
+    AiCallError,
+    AiConfig,
+    Transport,
+    complete,
+    config_from_env,
+    default_transport,
+    extract_json_array,
+)
 from modou.optimize.candidates import IndexCandidate
 from modou.snapshot.model import Snapshot
 
-ENV_BASE_URL = "MOUDO_AI_BASE_URL"
-ENV_API_KEY = "MOUDO_AI_API_KEY"
-ENV_MODEL = "MOUDO_AI_MODEL"
-
-DEFAULT_TIMEOUT_SECONDS = 30.0
-
-_JSON_ARRAY_PATTERN = re.compile(r"\[.*\]", re.DOTALL)
-
-Transport = Callable[[str, str, dict, float], dict]
-
-
-def _default_transport(url: str, api_key: str, payload: dict, timeout: float) -> dict[str, Any]:
-    """OpenAI 兼容端点调用（stdlib，无额外依赖；未配置时永不执行）。"""
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        body = response.read()
-    try:
-        return json.loads(body.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise ValueError(f"invalid AI endpoint response: {exc}") from exc
-
-
-@dataclass
-class AdvisorConfig:
-    base_url: str
-    api_key: str
-    model: str
-
-
-def config_from_env(env: Mapping[str, str]) -> AdvisorConfig | None:
-    """三元组缺一即未配置（含空白值）：未配置 = 零网络请求。"""
-    base_url = (env.get(ENV_BASE_URL) or "").strip()
-    api_key = (env.get(ENV_API_KEY) or "").strip()
-    model = (env.get(ENV_MODEL) or "").strip()
-    if not base_url or not api_key or not model:
-        return None
-    return AdvisorConfig(base_url=base_url, api_key=api_key, model=model)
+# 向后兼容：历史调用方（CLI/测试）从本模块导入配置与传输类型
+AdvisorConfig = AiConfig
 
 
 def build_schema_summary(snapshot: Snapshot, databases: set[str]) -> list[dict[str, Any]]:
@@ -98,9 +65,14 @@ def build_request_payload(
     statement_sql: str,
     schema_summary: list[dict[str, Any]],
     *,
+    explain_facts: dict[str, Any] | None = None,
     max_candidates: int = 5,
 ) -> dict[str, Any]:
-    """构造 OpenAI 兼容 chat/completions 请求体（JSON 输出约束在提示词中）。"""
+    """构造 OpenAI 兼容 chat/completions 请求体（JSON 输出约束在提示词中）。
+
+    explain_facts 是影子库基线 EXPLAIN 的预取事实（受控多轮的确定性半区，v0.5）：
+    候选生成基于实测计划而非模型猜测；缺省 None 保持 v0.2 one-shot 形态。
+    """
     system = (
         "You are a MySQL index and query advisor. Given one slow SQL statement and schema metadata, "
         f"propose at most {max_candidates} concrete suggestions. Respond with ONLY a JSON array; "
@@ -109,10 +81,16 @@ def build_request_payload(
         'or {"type":"rewrite","sql":"<rewritten sql>"} for a query rewrite. '
         "Do not propose indexes that already exist in the schema. No prose."
     )
-    user = {
+    user: dict[str, Any] = {
         "statement": statement_sql,
         "schema": schema_summary,
     }
+    if explain_facts is not None:
+        system += (
+            " Baseline EXPLAIN facts from the shadow database are provided; use them to target the "
+            "expensive access paths instead of guessing."
+        )
+        user["explain_facts"] = explain_facts
     return {
         "model": config.model,
         "messages": [
@@ -128,7 +106,8 @@ def maybe_fetch_candidates(
     statement_sql: str,
     schema_summary: list[dict[str, Any]],
     *,
-    transport: Transport = _default_transport,
+    explain_facts: dict[str, Any] | None = None,
+    transport: Transport = default_transport,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> list[IndexCandidate]:
     """未配置直接返回空（零网络）；已配置则拉取候选，失败降级为空。"""
@@ -138,6 +117,7 @@ def maybe_fetch_candidates(
         config,
         statement_sql,
         schema_summary,
+        explain_facts=explain_facts,
         transport=transport,
         timeout_seconds=timeout_seconds,
     )
@@ -148,37 +128,23 @@ def fetch_candidates(
     statement_sql: str,
     schema_summary: list[dict[str, Any]],
     *,
-    transport: Transport = _default_transport,
+    explain_facts: dict[str, Any] | None = None,
+    transport: Transport = default_transport,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> list[IndexCandidate]:
     """调用 BYOK 端点并解析候选；任何失败降级为空清单（fail-safe，不阻塞报告）。"""
-    payload = build_request_payload(config, statement_sql, schema_summary)
+    payload = build_request_payload(config, statement_sql, schema_summary, explain_facts=explain_facts)
     try:
-        response = transport(
-            config.base_url.rstrip("/") + "/chat/completions",
-            config.api_key,
-            payload,
-            timeout_seconds,
-        )
-    except (OSError, ValueError, TypeError, KeyError):
-        return []
-    try:
-        content = str(response["choices"][0]["message"]["content"])
-    except (KeyError, IndexError, TypeError):
+        content = complete(config, payload, transport=transport, timeout_seconds=timeout_seconds)
+    except AiCallError:
         return []
     return parse_candidate_content(content)
 
 
 def parse_candidate_content(content: str) -> list[IndexCandidate]:
     """从模型回复提取 JSON 数组并解析候选；不可解析/形态不对的条目逐条丢弃。"""
-    match = _JSON_ARRAY_PATTERN.search(content)
-    if match is None:
-        return []
-    try:
-        items = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(items, list):
+    items = extract_json_array(content)
+    if items is None:
         return []
     candidates: list[IndexCandidate] = []
     for item in items:
@@ -216,3 +182,19 @@ def parse_candidate_content(content: str) -> list[IndexCandidate]:
                     )
                 )
     return candidates
+
+
+__all__ = [
+    "DEFAULT_TIMEOUT_SECONDS",
+    "ENV_API_KEY",
+    "ENV_BASE_URL",
+    "ENV_MODEL",
+    "AdvisorConfig",
+    "Transport",
+    "build_request_payload",
+    "build_schema_summary",
+    "config_from_env",
+    "fetch_candidates",
+    "maybe_fetch_candidates",
+    "parse_candidate_content",
+]

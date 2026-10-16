@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from modou.lint import RULES, Thresholds, lint_paths, lint_sql_text
-from modou.lint.engine import LintParseError
 from modou.lint.rules import get_rule
 
 POSITIVE_CASES: dict[str, str] = {
@@ -93,17 +92,44 @@ class TestRulePositiveNegative:
 
 
 class TestEngineBehaviors:
-    def test_parse_failure_raises_with_line(self, tmp_path) -> None:
+    def test_unparseable_statement_recorded_and_audit_continues(self, tmp_path) -> None:
+        """解析失败逐语句记录为工具命中（PARSE.001），整轮不中断。
+
+        真链真实形态：版本条件注释（H2 兼容写法）解析不出表达式，后随可解析语句
+        的规则命中必须照常产出（spec 2026-10-15 修订：非静默跳过 → 逐条记录）。
+        """
+        f = tmp_path / "cond.sql"
+        f.write_text(
+            "-- 对齐排序规则\n"
+            "/*!50700 ALTER TABLE t MODIFY COLUMN c VARCHAR(64) NOT NULL */;\n"
+            "UPDATE orders SET status = 1;\n",
+            encoding="utf-8",
+        )
+        result = lint_paths([f], RULES)
+        parse_hits = [h for h in result.hits if h.rule_id == "PARSE.001"]
+        assert len(parse_hits) == 1
+        assert parse_hits[0].level == "warning"
+        assert parse_hits[0].line == 1
+        assert parse_hits[0].file == str(f)
+        assert parse_hits[0].message
+        assert any(h.rule_id == "CLA.015" for h in result.hits)
+        assert result.exit_code == 1
+
+    def test_unparseable_hit_position_and_skip(self, tmp_path) -> None:
         f = tmp_path / "bad.sql"
         # 字符串引号不闭合 = 真不可解析（sqlglot 对乱码宽容、会把未知词解析成
         # 标识符；残缺结构才抛 ParseError——口径与解析器能力一致）
         f.write_text("SELECT 1;\nSELECT 'unclosed;\n", encoding="utf-8")
-        from modou.lint import lint_paths
-
-        with pytest.raises(LintParseError) as exc_info:
-            lint_paths([f], RULES)
-        assert exc_info.value.line == 2
-        assert str(f) in str(exc_info.value)
+        result = lint_paths([f], RULES)
+        parse_hits = [h for h in result.hits if h.rule_id == "PARSE.001"]
+        assert len(parse_hits) == 1
+        assert parse_hits[0].line == 2
+        assert parse_hits[0].file == str(f)
+        assert result.exit_code == 1
+        # 工具命中可被既有跳过机制显式关闭，关闭后恢复 0
+        skipped = lint_paths([f], RULES, disabled={"PARSE.001"})
+        assert skipped.hits == []
+        assert skipped.exit_code == 0
 
     def test_statement_line_mapping(self) -> None:
         text = "-- 说明\nSELECT id FROM orders;\n\nUPDATE orders SET status = 1;\n"

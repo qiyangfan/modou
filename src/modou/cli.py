@@ -14,17 +14,18 @@ import pymysql.err
 import typer
 
 from modou import __version__
+from modou.ai.client import config_from_env as ai_config_from_env
 from modou.changeset.pack import ChangesetValidationError, pack_changeset
 from modou.db import MysqlParams
 from modou.diff.pipeline import VerifyInputError, run_verify
-from modou.lint import RULES, LintParseError, lint_paths
+from modou.lint import PARSE_RULE_ID, RULES, lint_paths
 from modou.lint import render_text as render_lint_text
 from modou.lint.config import LintConfigError, load_lint_config
-from modou.optimize.advisor import config_from_env as advisor_config_from_env
 from modou.optimize.pipeline import run_optimize
 from modou.params import resolve_params
 from modou.patrol.unused_indexes import DEFAULT_OBSERVE_DAYS
 from modou.replay.splitter import split_statements
+from modou.report.opinions import AiOpinion, attach_ai_opinions, render_opinions_section
 from modou.snapshot.capture import capture_to_file
 from modou.snapshot.model import snapshot_from_json
 
@@ -68,6 +69,9 @@ def snapshot_capture(
     port: int | None = typer.Option(None, "--port", min=1, max=65535, help="MySQL port (overrides DSN)."),
     user: str | None = typer.Option(None, "--user", help="MySQL user (overrides DSN)."),
     password: str | None = typer.Option(None, "--password", help="MySQL password (env: MOUDO_MYSQL_PASSWORD)."),
+    report_json: Path | None = typer.Option(
+        None, "--report-json", help="Write metadata-only snapshot summary (evidence primitive for host agents)."
+    ),
 ) -> None:
     """Capture a read-only structural snapshot of the given databases."""
     params = _resolve_params(dsn, host, port, user, password)
@@ -78,6 +82,17 @@ def snapshot_capture(
         # 契约映射退出码 2；1 保留给「存在差异」语义，采集不产出差异结论
         typer.secho(f"snapshot capture failed: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
+    if report_json is not None:
+        from modou.snapshot.summary import snapshot_summary
+
+        try:
+            report_json.write_text(
+                json.dumps(snapshot_summary(snapshot), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=2) from exc
+        typer.echo(f"report -> {report_json}", err=True)
     sampled_note = f", sample-rows={sample_rows}" if sample_rows else ""
     typer.echo(
         f"captured {len(snapshot.databases)} database(s) "
@@ -196,7 +211,11 @@ def verify(
         False, "--keep-container", help="Keep the shadow container for troubleshooting."
     ),
 ) -> None:
-    """Replay the changeset on a local shadow MySQL and three-way diff baseline/expected/actual."""
+    """Replay the changeset on a local shadow MySQL and three-way diff baseline/expected/actual.
+
+    Optional AI failure attribution: set MOUDO_AI_BASE_URL / MOUDO_AI_API_KEY / MOUDO_AI_MODEL (BYOK).
+    Without configuration no network request is made; opinions never affect the exit code.
+    """
     try:
         baseline_snapshot = snapshot_from_json(baseline.read_text(encoding="utf-8"))
         after_snapshot = snapshot_from_json(after.read_text(encoding="utf-8"))
@@ -222,17 +241,33 @@ def verify(
             typer.secho(f"  - {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
 
+    # AI 失败归因（可选）：零差异零调用；观点只进报告单列区（退出码免疫）
+    ai_config = ai_config_from_env(dict(os.environ))
+    opinions: list[AiOpinion] = []
+    if ai_config is not None:
+        from modou.ai.lane_verify import attribute_findings
+
+        opinions = attribute_findings(
+            outcome.report_json,
+            changeset_dir,
+            baseline_snapshot,
+            config=ai_config,
+            default_database=default_database,
+            allow_legacy_names=allow_legacy_names,
+        )
+
     if report_json is not None:
         try:
             report_json.write_text(
-                json.dumps(outcome.report_json, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+                json.dumps(attach_ai_opinions(outcome.report_json, opinions), ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
             )
         except OSError as exc:
             # 报告不可写属环境错误（契约 2），不得让裸 traceback 覆盖验收结论
             typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=2) from exc
         typer.echo(f"report -> {report_json}", err=True)
-    typer.echo(outcome.render())
+    typer.echo(outcome.render() + render_opinions_section(opinions))
     raise typer.Exit(code=outcome.exit_code)
 
 
@@ -276,7 +311,7 @@ def optimize(
         typer.secho(f"cannot read statements file: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
 
-    advisor_config = advisor_config_from_env(dict(os.environ))
+    advisor_config = ai_config_from_env(dict(os.environ))
     outcome = run_optimize(
         statements,
         baseline_snapshot,
@@ -313,7 +348,11 @@ def lint(
     skip_rule: list[str] = typer.Option([], "--skip-rule", help="Skip a rule id (repeatable; overrides config file)."),
     config: Path | None = typer.Option(None, "--config", help="Config file (default: modou.toml in cwd)."),
 ) -> None:
-    """Run static SQL rule checks (no database, no network). Exit 0/1/2."""
+    """Run static SQL rule checks (no database). Exit 0/1/2.
+
+    Optional AI residual review: set MOUDO_AI_BASE_URL / MOUDO_AI_API_KEY / MOUDO_AI_MODEL (BYOK).
+    Without configuration no network request is made and the report carries no AI section.
+    """
     try:
         lint_config = load_lint_config(config)
     except LintConfigError as exc:
@@ -321,7 +360,9 @@ def lint(
         raise typer.Exit(code=2) from exc
 
     disabled = set(lint_config.disabled) | set(skip_rule)
-    missing_rules = sorted(disabled - {rule.rule_id for rule in RULES})
+    # PARSE.001 是引擎产出的工具命中（非规则清单成员），同属可跳过对象
+    known_rule_ids = {rule.rule_id for rule in RULES} | {PARSE_RULE_ID}
+    missing_rules = sorted(disabled - known_rule_ids)
     if missing_rules:
         typer.secho(
             f"unknown rule id(s) in skip/disable: {', '.join(missing_rules)}",
@@ -335,22 +376,34 @@ def lint(
             raise typer.Exit(code=2)
     try:
         result = lint_paths(list(paths), RULES, thresholds=lint_config.thresholds, disabled=disabled)
-    except (LintParseError, OSError, UnicodeDecodeError) as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         typer.secho(f"lint failed: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
+
+    # AI 残留评审（可选）：引擎单趟产出的残留面交内置通道出观点；未配置零网络，
+    # 观点只进报告单列区（退出码免疫，opinions 契约模块单源）
+    ai_config = ai_config_from_env(dict(os.environ))
+    opinions: list[AiOpinion] = []
+    if ai_config is not None:
+        from modou.ai.bundler import StatementUnit
+        from modou.ai.lane_lint import review_residual
+
+        units = [StatementUnit(file=r.file, line=r.line, sql=r.sql) for r in result.residuals]
+        opinions = review_residual(units, result.hits, ai_config)
 
     if report_json is not None:
         from modou.lint import result_to_json
 
         try:
             report_json.write_text(
-                json.dumps(result_to_json(result), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+                json.dumps(attach_ai_opinions(result_to_json(result), opinions), ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
             )
         except OSError as exc:
             typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=2) from exc
         typer.echo(f"report -> {report_json}", err=True)
-    typer.echo(render_lint_text(result))
+    typer.echo(render_lint_text(result) + render_opinions_section(opinions))
     raise typer.Exit(code=result.exit_code)
 
 
@@ -508,6 +561,65 @@ def patrol_unused_indexes(
             raise typer.Exit(code=2) from exc
         typer.echo(f"report -> {report_json}", err=True)
     typer.echo(unused_render(report))
+
+
+@patrol_app.command("summarize")
+def patrol_summarize(
+    drift: Path | None = typer.Option(None, "--drift", help="Drift report JSON (patrol_drift)."),
+    unused: Path | None = typer.Option(None, "--unused", help="Unused-indexes report JSON (patrol_unused_indexes)."),
+    slowlog: Path | None = typer.Option(None, "--slowlog", help="Slowlog report JSON (patrol_slowlog)."),
+    report_json: Path | None = typer.Option(None, "--report-json"),
+) -> None:
+    """Cross-signal patrol digest from existing reports.
+
+    Optional AI narrative: set MOUDO_AI_BASE_URL / MOUDO_AI_API_KEY / MOUDO_AI_MODEL (BYOK).
+    Without configuration no network request is made; opinions never affect the exit code.
+    """
+    from modou.patrol.summary import SummaryInputError, summarize_render, summarize_reports
+
+    def _load(option: str, path: Path | None) -> dict | None:
+        if path is None:
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            typer.secho(f"cannot load {option} report: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=2) from exc
+
+    try:
+        report = summarize_reports(
+            _load("drift", drift),
+            _load("unused", unused),
+            _load("slowlog", slowlog),
+            inputs={
+                "drift": str(drift) if drift else None,
+                "unused": str(unused) if unused else None,
+                "slowlog": str(slowlog) if slowlog else None,
+            },
+        )
+    except SummaryInputError as exc:
+        typer.secho(f"patrol summarize failed: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2) from exc
+
+    # AI 跨信号叙事（可选）：digest 是确定性事实，叙事是观点（退出码免疫）
+    ai_config = ai_config_from_env(dict(os.environ))
+    opinions: list[AiOpinion] = []
+    if ai_config is not None:
+        from modou.ai.lane_patrol import narrativize
+
+        opinions = narrativize(report, config=ai_config)
+
+    if report_json is not None:
+        try:
+            report_json.write_text(
+                json.dumps(attach_ai_opinions(report, opinions), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=2) from exc
+        typer.echo(f"report -> {report_json}", err=True)
+    typer.echo(summarize_render(report) + render_opinions_section(opinions))
+    raise typer.Exit(code=int(report["exit_code"]))
 
 
 @patrol_app.command("slowlog")

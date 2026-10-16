@@ -328,7 +328,14 @@ def _measure_statement(
     baseline_plan = explain_json(conn, sql)
     actual_before = _reference_actual_ms(conn, analysis)
 
-    ai_candidates = maybe_fetch_candidates(advisor_config, sql, schema_summary)
+    # 事实预取打包（v0.5 受控多轮的确定性半区）：候选生成基于基线实测计划，
+    # 实证关与副作用检查不变——AI 候选仍逐个过影子实证
+    ai_candidates = maybe_fetch_candidates(
+        advisor_config,
+        sql,
+        schema_summary,
+        explain_facts={"query_cost": baseline_plan.query_cost, "table_accesses": baseline_plan.table_accesses},
+    )
     # AI 候选通常不带库限定：归属到当前语句的库（表名校验在 resolve_candidates 中兜底）
     for candidate in ai_candidates:
         if candidate.kind == "index" and candidate.database is None and analysis.database is not None:

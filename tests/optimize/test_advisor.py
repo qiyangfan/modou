@@ -138,3 +138,27 @@ class TestFetchCandidates:
         result = maybe_fetch_candidates(None, "SELECT 1 FROM t", [], transport=fake_transport)
         assert result == []
         assert calls == []
+
+
+class TestExplainFactsPacking:
+    def test_payload_carries_explain_facts_when_provided(self) -> None:
+        config = AdvisorConfig("https://x/v1", "k", "m")
+        payload = build_request_payload(
+            config,
+            "SELECT * FROM orders WHERE user_id = 7",
+            [],
+            explain_facts={
+                "query_cost": 12.5,
+                "table_accesses": [{"table": "orders", "access_type": "ALL", "rows": 2000}],
+            },
+        )
+        user = json.loads(payload["messages"][1]["content"])
+        assert user["explain_facts"]["query_cost"] == 12.5
+        assert user["explain_facts"]["table_accesses"][0]["access_type"] == "ALL"
+        assert "EXPLAIN" in payload["messages"][0]["content"]
+
+    def test_payload_without_facts_stays_backward_compatible(self) -> None:
+        config = AdvisorConfig("https://x/v1", "k", "m")
+        payload = build_request_payload(config, "SELECT 1 FROM t", [])
+        user = json.loads(payload["messages"][1]["content"])
+        assert "explain_facts" not in user

@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -20,12 +21,14 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 from modou import __version__
+from modou.ai.client import config_from_env
 from modou.changeset.pack import ChangesetValidationError, pack_changeset
 from modou.diff.pipeline import VerifyInputError, run_verify
 from modou.optimize.pipeline import run_optimize
 from modou.params import PasswordUnavailableError, resolve_params
 from modou.replay.splitter import split_statements
-from modou.server.surface_map import EXCLUDED_COMMANDS, cli_command_map
+from modou.report.opinions import AiOpinion
+from modou.server.surface_map import EVIDENCE_PRIMITIVES, EXCLUDED_COMMANDS, cli_command_map
 from modou.snapshot.capture import capture_to_file
 from modou.snapshot.model import snapshot_from_json
 
@@ -132,8 +135,26 @@ def _register_tools(mcp: FastMCP) -> None:
             )
         except VerifyInputError as exc:
             raise ToolError(f"changeset validation failed: {'; '.join(exc.errors)}") from exc
+        # AI 失败归因与 CLI 同车道：未配置零网络；观点只进报告（退出码免疫）
+        import os
+
+        from modou.report.opinions import attach_ai_opinions
+
+        ai_config = config_from_env(dict(os.environ))
+        opinions: list[AiOpinion] = []
+        if ai_config is not None:
+            from modou.ai.lane_verify import attribute_findings
+
+            opinions = attribute_findings(
+                outcome.report_json,
+                Path(changeset_dir),
+                baseline_snapshot,
+                config=ai_config,
+                default_database=default_database,
+                allow_legacy_names=allow_legacy_names,
+            )
         # 结论性输出：报告与退出码是数据（agent 据此判断结论档位），不转工具错误
-        return {"exit_code": outcome.exit_code, "report": outcome.report_json}
+        return {"exit_code": outcome.exit_code, "report": attach_ai_opinions(outcome.report_json, opinions)}
 
     @mcp.tool(
         name="snapshot_capture",
@@ -162,18 +183,10 @@ def _register_tools(mcp: FastMCP) -> None:
             raise ToolError(f"snapshot capture failed: {exc}") from exc
         except Exception as exc:
             raise ToolError(f"snapshot capture failed: {exc}") from exc
-        return {
-            "exit_code": 0,
-            "output": str(output),
-            "server_version": snapshot.meta.server_version,
-            "databases": {
-                name: {
-                    "tables": len(inv.tables),
-                    "sampled_tables": sum(1 for t in inv.tables.values() if t.sample is not None and t.sample.rows),
-                }
-                for name, inv in snapshot.databases.items()
-            },
-        }
+        from modou.snapshot.summary import snapshot_summary
+
+        # 证据原语（ADR-0009）：summary 与 CLI --report-json 同源（snapshot_summary 单源）
+        return {"exit_code": 0, "output": str(output), "summary": snapshot_summary(snapshot)}
 
     @mcp.tool(
         name="optimize",
@@ -196,8 +209,6 @@ def _register_tools(mcp: FastMCP) -> None:
             raise ToolError(f"cannot load inputs: {exc}") from exc
         import os
 
-        from modou.optimize.advisor import config_from_env
-
         outcome = run_optimize(
             statements,
             baseline_snapshot,
@@ -219,24 +230,39 @@ def _register_tools(mcp: FastMCP) -> None:
         skip_rule: list[str] | None = None,
         config: str | None = None,
     ) -> dict[str, Any]:
-        """Run static SQL rule checks (no database, no network). Exit 0/1/2."""
-        from modou.lint import RULES, LintParseError, lint_paths, result_to_json
+        """Run static SQL rule checks (no database). AI residual review when BYOK env is set."""
+        import os
+
+        from modou.lint import PARSE_RULE_ID, RULES, lint_paths, result_to_json
         from modou.lint.config import LintConfigError, load_lint_config
+        from modou.report.opinions import attach_ai_opinions
 
         try:
             lint_config = load_lint_config(Path(config) if config else None)
         except LintConfigError as exc:
             raise ToolError(f"lint config error: {exc}") from exc
         disabled = set(lint_config.disabled) | set(skip_rule or [])
-        unknown_rules = sorted(disabled - {rule.rule_id for rule in RULES})
+        # PARSE.001 是引擎产出的工具命中（非规则清单成员），同属可跳过对象；与 CLI 同语义
+        known_rule_ids = {rule.rule_id for rule in RULES} | {PARSE_RULE_ID}
+        unknown_rules = sorted(disabled - known_rule_ids)
         if unknown_rules:
             # 与 CLI 同语义：拼错的规则 id 必须拒绝，静默并入会改变审核结论口径
             raise ToolError(f"lint failed: unknown rule id(s) in skip/disable: {', '.join(unknown_rules)}")
         try:
             result = lint_paths([Path(p) for p in paths], RULES, thresholds=lint_config.thresholds, disabled=disabled)
-        except (LintParseError, OSError, UnicodeDecodeError) as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             raise ToolError(f"lint failed: {exc}") from exc
-        return {"exit_code": result.exit_code, "report": result_to_json(result)}
+
+        # AI 残留评审与 CLI 同车道：未配置零网络；观点只进报告（退出码免疫）
+        ai_config = config_from_env(dict(os.environ))
+        opinions: list[AiOpinion] = []
+        if ai_config is not None:
+            from modou.ai.bundler import StatementUnit
+            from modou.ai.lane_lint import review_residual
+
+            units = [StatementUnit(file=r.file, line=r.line, sql=r.sql) for r in result.residuals]
+            opinions = review_residual(units, result.hits, ai_config)
+        return {"exit_code": result.exit_code, "report": attach_ai_opinions(result_to_json(result), opinions)}
 
     @mcp.tool(
         name="patrol_drift",
@@ -373,6 +399,45 @@ def _register_tools(mcp: FastMCP) -> None:
         return {"exit_code": 0, "report": slowlog_to_json(report)}
 
     @mcp.tool(
+        name="patrol_summarize",
+        description=command_help["patrol_summarize"],
+    )
+    def patrol_summarize(
+        drift: str | None = None,
+        unused: str | None = None,
+        slowlog: str | None = None,
+    ) -> dict[str, Any]:
+        """Cross-signal patrol digest from existing reports. AI narrative when BYOK env is set."""
+        import os
+
+        from modou.ai.lane_patrol import narrativize
+        from modou.patrol.summary import SummaryInputError, summarize_reports
+        from modou.report.opinions import attach_ai_opinions
+
+        def _load(path: str | None) -> dict | None:
+            if path is None:
+                return None
+            try:
+                return json.loads(Path(path).read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ToolError(f"cannot load patrol report: {exc}") from exc
+
+        try:
+            report = summarize_reports(
+                _load(drift),
+                _load(unused),
+                _load(slowlog),
+                inputs={"drift": drift, "unused": unused, "slowlog": slowlog},
+            )
+        except SummaryInputError as exc:
+            raise ToolError(f"patrol summarize failed: {exc}") from exc
+        ai_config = config_from_env(dict(os.environ))
+        opinions: list[AiOpinion] = []
+        if ai_config is not None:
+            opinions = narrativize(report, config=ai_config)
+        return {"exit_code": int(report["exit_code"]), "report": attach_ai_opinions(report, opinions)}
+
+    @mcp.tool(
         name="version",
         description=command_help["version"],
     )
@@ -386,4 +451,4 @@ def run_server() -> None:
     build_mcp_server().run()
 
 
-__all__ = ["EXCLUDED_COMMANDS", "build_mcp_server", "cli_command_map", "run_server"]
+__all__ = ["EVIDENCE_PRIMITIVES", "EXCLUDED_COMMANDS", "build_mcp_server", "cli_command_map", "run_server"]

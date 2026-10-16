@@ -219,8 +219,9 @@ SHOW CREATE TABLE / VIEW / PROCEDURE / FUNCTION / TRIGGER / EVENT <db>.<obj>;
   报告不可写）。1 不使用：建议性输出不构成验收结论。
   冗余判定忽略前缀长度的对侧不成立：带前缀长度（如 a(64)）的现有索引与完整列
   候选不互判冗余（比较以「列+前缀长度」整体进行）；
-- `modou lint`：0=无命中；1=存在命中；2=环境或输入错误（文件不可读、语句无法
-  解析、配置非法、未知规则 id、路径不存在）；
+- `modou lint`：0=无命中；1=存在命中（规则命中或 PARSE.001 解析命中——无法解析
+  的语句逐条记录为工具命中，不中止整轮）；2=环境或输入错误（文件不可读、配置非法、
+  未知规则 id、路径不存在）；
 - `modou patrol drift`：0=无漂移结论；1=存在漂移结论；2=环境或输入错误（快照
   不可读、live 采集失败）；
 - `modou patrol unused-indexes`：0=报告产出（建议性输出）；2=环境或输入错误
@@ -239,7 +240,9 @@ SHOW CREATE TABLE / VIEW / PROCEDURE / FUNCTION / TRIGGER / EVENT <db>.<obj>;
 
 ## 审核报告格式（report_kind = lint，report_version = 1）
 
-`modou lint --report-json` 产出。纯静态判定，无数据库、无容器、无网络。
+`modou lint --report-json` 产出。引擎纯静态判定（无数据库、无容器、不联网）；
+配置 BYOK 三元组时附带 AI 残留语句语义评审（可选键 `ai_opinions`，见
+「AI 观点区」节；未配置时无该键，行为不变）。
 
 ```jsonc
 {
@@ -257,6 +260,10 @@ SHOW CREATE TABLE / VIEW / PROCEDURE / FUNCTION / TRIGGER / EVENT <db>.<obj>;
   ]
 }
 ```
+
+`rule_id` 是开放集合：除 SOAR 规则外，`PARSE.001` 是引擎产出的工具命中（语句无法
+解析，非规则清单成员；级别固定 warning），指认文件与语句起始行，可经
+`--skip-rule PARSE.001` 显式关闭。
 
 ## 巡检报告格式（report_kind = patrol_*，report_version = 1）
 
@@ -288,6 +295,61 @@ SHOW CREATE TABLE / VIEW / PROCEDURE / FUNCTION / TRIGGER / EVENT <db>.<obj>;
   "top": [ { "fingerprint": "select * from orders where user_id = ?", "count": 2,
              "query_time_total": 4.0, "query_time_max": 2.5,
              "rows_examined_total": 300000, "sample": "SELECT ..." } ] }
+
+// patrol_summary：跨信号综合（v0.5，`modou patrol summarize`）——确定性 digest，
+// 输入为上三类报告文件（至少一份；report_kind 错位 = 输入错误退出 2）
+{ "report_kind": "patrol_summary", "report_version": 1, "exit_code": 1,
+  "generated_at": "...", "inputs": { "drift": "d.json", "unused": null, "slowlog": null },
+  "signals": {
+    "drift":   { "exit_code": 1, "added": 2, "removed": 0, "changed": 1,
+                 "objects": [ { "database", "object_type", "object_name", "category" } ] },
+    "unused":  { "exit_code": 0, "uptime_seconds", "observe_days",
+                 "confirmed_unused": 1, "low_use": 0, "insufficient_data": 0, "redundant": 1,
+                 "items": [ { "database", "table", "index", "status" } ] },
+    "slowlog": { "exit_code": 0, "entries_parsed": 42, "fingerprints": 3,
+                 "top": [ { "fingerprint", "count", "query_time_total", "rows_examined_total" } ] } } }
+// exit_code 取已加载信号的最严重档；样本 SQL 不进摘要
+```
+
+## AI 观点区（ai_opinions，v0.5，各车道报告「只增不改」）
+
+配置 BYOK 三元组（`MOUDO_AI_BASE_URL` / `MOUDO_AI_API_KEY` / `MOUDO_AI_MODEL`）后，
+verify（失败归因）、lint（残留语句评审）、patrol summarize（跨信号叙事）、
+optimize（候选生成，advisor 节既有）四车道可附 AI 分析。契约
+（spec ai-analyst「结论两级分级」，ADR-0009）：
+
+- **未配置**：不发起任何网络请求，报告不含 `ai_opinions` 键，与无 AI 版本零差异；
+- **单列**：观点只出现在报告顶层可选键 `ai_opinions`（机读）与文本报告尾部的
+  「AI 观点」区（人读），不混入确定性结论字段；
+- **退出码免疫**：AI 观点永不影响 `exit_code`（结构性保证：观点合并函数不读不写该字段）；
+- **降级可见**：调用失败产出 `status="degraded"` 条目并标注原因，报告照常产出。
+
+```jsonc
+"ai_opinions": [
+  { "lane": "verify",                       // verify / lint / patrol
+    "subject": "shop.table:orders",         // 对象定位（lint 为 文件:行；patrol 为 cross-signal）
+    "opinion": "索引缺失疑似漏执行……",       // 观点正文（中文）
+    "source": "ai", "model": "<模型名>",     // 来源标注
+    "status": "ok",                          // ok / degraded
+    "degraded_reason": null }
+]
+```
+
+## 快照摘要（snapshot capture --report-json，v0.5 委托面证据原语）
+
+`modou snapshot capture --report-json <path>` 与 MCP `snapshot_capture` 工具的
+`summary` 字段同源（kernel `snapshot_summary` 单源，一致性校验守护）：仅元数据，
+采样数据行绝不进摘要。**breaking 说明**：MCP `snapshot_capture` 的输出自 v0.5 起
+以 `summary` 承载证据（原 v0.3 的 `server_version` + `databases` 计数键被取代），
+既有 MCP 客户端请迁移到 `summary.databases`（`tables` 等同名计数在场，另含
+`table_details`；旧 `sampled_tables` 计数由 `table_details[].sampled_rows > 0`
+的条目数承接——0 行与跳过采样的表在两侧口径下都不计入）。
+
+```jsonc
+{ "server_version": "8.4.6",
+  "databases": { "<库名>": {
+      "tables": 3, "views": 1, "procedures": 2, "functions": 0, "triggers": 1, "events": 0,
+      "table_details": [ { "table": "orders", "columns": 12, "indexes": 4, "sampled_rows": 200 } ] } } }
 ```
 
 ## 报告 UI 类型识别口径

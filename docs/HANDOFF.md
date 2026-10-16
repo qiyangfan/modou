@@ -1,9 +1,16 @@
 # HANDOFF — modou
 
-## 现状（2026-10-15，v0.2~v0.4 全车道落地 + 两轮评审修复 + 五 change 已归档）
+## 现状（2026-10-16，v0.1~v0.5 全部落地 + 六能力 spec 已归档）
+
+**AI 分析师层（v0.5，2026-10-16 落地并归档）**：ADR-0009 定调「AI 当分析师——
+确定性工程 × AI 混合架构」，部分取代 ADR-0003 的 AI 职责面（确定性裁判、实证关、
+退出码条款不变）。能力契约见 openspec/specs/ai-analyst/spec.md：委托面（MCP 证据
+原语 + skills，零密钥主通道）+ BYOK 内置受控调用（lint 残留评审 / verify 归因 /
+patrol 跨信号叙事 / optimize 升级）+ 报告"AI 观点"区（不碰退出码，两级标注）。
+本文其余「AI 顾问」表述按新口径理解。
 
 治理层全量就位：宪法（openspec/project.md，六条红线）、目标体系（docs/goals.md）、
-ADR 0001~0008、AGENTS.md（门禁单源）、CI（core 门禁 + ui Node 24 门禁，ui/ 落地后
+ADR 0001~0009、AGENTS.md（门禁单源）、CI（core 门禁 + ui Node 24 门禁，ui/ 落地后
 自动生效）。四车道三表面全部实现：
 
 - 变更车道（v0.1）：`changeset/`（发现/manifest/pack 预警）、`snapshot/`、`replay/`、
@@ -15,13 +22,17 @@ ADR 0001~0008、AGENTS.md（门禁单源）、CI（core 门禁 + ui Node 24 门�
   modou.toml 可配置；
 - 洞察车道（v0.4b）：`patrol/`——两方漂移 diff / 未用索引分层判定 / 慢日志指纹
   聚合（pt-query-digest 口径）；
-- MCP 表面（v0.3）：`server/`——9 工具与 CLI 1:1（parity 测试守护），stdio、
-  fastmcp 4.x（可选 extra `mcp`，dev 组含测试依赖）；
+- MCP 表面（v0.3，v0.5 扩列）：`server/`——10 工具与 CLI 1:1（parity 测试守护），
+  stdio、fastmcp 4.x（可选 extra `mcp`，dev 组含测试依赖）；证据原语清单冻结在
+  `surface_map.EVIDENCE_PRIMITIVES`（快照摘要/回放验收/三方 diff/EXPLAIN/lint 命中，
+  后两项由 verify/optimize 报告承载）；
 - 薄报告层（v0.4c）：`ui/`（前端，无框架 TS+Vite，构建产物随 wheel 分发，
   运行期零 Node）+ `ui/server.py`（回环 HTTP，报告 kind/version 门禁）。
 
-数据格式契约见 [formats.md](formats.md)（v2 快照 + optimize/lint/patrol 报告格式）。
-网络行为仅 AI 顾问 BYOK（未配置零联网，红线未动）。
+数据格式契约见 [formats.md](formats.md)（v2 快照 + optimize/lint/patrol/patrol_summary
+报告格式 + AI 观点区契约 + 快照摘要）。网络行为仅 AI 分析师 BYOK（未配置零联网，
+红线未动）：v0.5 起覆盖四车道——lint 残留评审 / verify 失败归因 / patrol 跨信号
+叙事 / optimize 候选生成；委托面（MCP 证据原语 + skills 资产）零密钥可用。
 
 ## 口径
 
@@ -214,6 +225,61 @@ modou verify examples/changeset-demo --baseline before.json --after after.json \
   （`MOUDO_TEST_SHADOW=1` + STRICT，含生成列采样灌入回归）；CLI 冒烟全绿；
   ui 门禁（typecheck/lint/test=build+vitest 18 用例）全绿。
 
+## 实证记录（2026-10-16，v0.5 AI 分析师层第一刀）
+
+- **结论分级契约**：`report/opinions.py` 是唯一口径——`ai_opinions` 可选键 +
+  文本「AI 观点」区；未配置 BYOK 时 attach 空清单是恒等函数（与 v0.4 零差异的
+  机械保证）；调用失败产出 degraded 条目（标注原因），退出码免疫由「合并不接触
+  exit_code」结构性保证。四车道（verify/lint/patrol summarize/optimize）已接线，
+  契约测试 tests/report/test_opinions.py 守护。
+- **内核 `ai/` 模块**：client（BYOK 客户端自 optimize/advisor.py 收拢，行为不变——
+  既有 advisor 测试未改一字全绿）、slicer（按语句触达裁剪 schema，触达表必含、
+  预算约束补充上下文）、bundler（按库分包、单条超限独占一批不丢弃）、injector
+  （规则命中模板化注入）。
+- **车道 AI 工作流**：lint 残留评审（规则零命中语句 = 残留面，`lint.engine.
+  residual_statements` 与引擎共用单语句判定核心）；verify 失败归因（零差异零调用，
+  幻觉 subject 丢弃）；patrol summarize（新命令 `patrol summarize` + MCP
+  `patrol_summarize`：确定性 digest + 可选叙事，输入报告 report_kind 错位退出 2）。
+- **optimize 事实预取**：候选请求附带基线 EXPLAIN 事实（query_cost + 表访问），
+  实证关与副作用检查不变；`build_request_payload` 缺省 None 保持 v0.2 形态。
+- **委托面冒烟（本机 podman + mysql:8.4）**：`tests/mcp/test_demo_flow.py`
+  （MOUDO_TEST_SHADOW=1）通过——宿主 Agent 视角仅凭 MCP 工具完成 pack → verify
+  （漏执行 exit 1 指认）→ optimize（两级状态）链路，37s；影子集成 31 用例全绿
+  （STRICT 模式）。skills 资产 `modou/skills/database-change-review/SKILL.md`
+  随包分发（importlib.resources 测试守护，工作流覆盖全部证据原语）。
+- **评测门禁**：tests/evals/ 双层——确定性半区恒跑（数据集聚合性 + 上下文工程
+  回归 + 提示词契约字符串），BYOK 半区三元组齐备才跑（真实端点逐案评审、精度
+  落盘 evals/lint_residual/last-run.json、劣化即失败）。数据集设计教训：
+  正例必须真在规则盲区——首版数据集被 COL.005（列缺注释）拦住，语句需按
+  docs/rules.md 逐条规避后才算「残留面样本」。
+- 未配置 BYOK 全车道回归：`ai_opinions` 键缺席、文本无观点区、退出码不变
+  （lint/verify/patrol summarize 各有零网络回归测试，AI 入口 spy 断言不被调用）；
+  tests/conftest.py 的 autouse 夹具默认剥离 BYOK 三元组（防配置了端点的开发机上
+  普通用例发起真实网络），评测门禁用例以 `needs_byok_env` 标记豁免。
+- **独立评审（2026-10-16 子代理）修复面**：lint 目录输入下 AI 残留评审失效
+  （引擎改为单趟产出 `LintResult.residuals`，命中与残留同源，根除双读/双跑）；
+  三车道「回复不可解析」从静默零观点改为 degraded 条目（spec「调用失败降级」
+  原口径）；patrol summarize 畸形输入收敛退出码 2（形状强校验）且档位 2 不再
+  被钳成 1；verify 未配置零网络测试改走真实可达路径。**MCP breaking**：
+  `snapshot_capture` 输出以 `summary` 取代 v0.3 的 `databases` 计数键（见
+  formats.md「快照摘要」迁移说明）。
+- **独立评审（2026-10-16 第二轮，三路并行子代理）修复面**：AI 客户端 fail-safe
+  边界收拢——`http.client.HTTPException` 族（代理半途断连的 BadStatusLine/
+  IncompleteRead）不继承 OSError，原窄捕获可穿透炸掉命令并改写退出码，
+  `complete()` 改为全异常归入 `AiCallError`（content=null 同样归因调用失败，
+  不再把字符串 "None" 送进解析层）；verify 事实打包段（schema 切片）并入降级
+  守卫；两个测试门禁空转修复——verify 未配置 tripwire 的断言在 CliRunner 吞异常
+  后恒真（补 `--report-json` 落盘断言使其可达），eval 精度门曾把 degraded 计为
+  命中（端点不可达也能凑过地板，现 degraded 即失败）；lint 引擎解析错误首行
+  提取兜底空消息；MCP `patrol_summarize` 补 `inputs`（与 CLI 同形，报告元数据
+  两表面一致）。三条遗留疑问已裁决（2026-10-16）：sql-lint spec 纯静态约束加
+  作用域注记（AI 残留评审不属审核，网络行为归 ai-analyst 规格）；UI 识别
+  `patrol_summary`/渲染 `ai_opinions` 列入后续 change（本变更契约只增不改，
+  旧报告加载零破坏）；verify 归因切片只取 baseline 属设计取舍（新建表定义经
+  语句全文在场；after 快照在漏执行场景同样缺该表，不补）。已知演进位（未修，
+  属 v0.5 范围外）：verify 归因载荷 statements 无字符封顶、残留评审批次串行、
+  verify subject 不含 kind 后缀。
+
 ## 全量代码评审（2026-10-15，第二轮：五车道并行 + 修复循环）
 
 五独立子代理按车道评审（optimize / lint+patrol / MCP+params / snapshot v2 / UI），
@@ -255,14 +321,17 @@ modou verify examples/changeset-demo --baseline before.json --after after.json \
 
 ## 待确认（上报 owner）
 
-1. **lint 对存储过程/触发器体快速失败**：sqlglot 结构性不支持 `BEGIN...END` 过程体
-   （IN/OUT 参数模式即报错）。spec（sql-lint）定义「无法解析的语句整体输入错误、
-   不静默跳过」——现按 spec 实现（含过程的变更集目录 lint = 退出码 2 并指认文件行）。
-   工程上真实变更集常含过程，建议后续 change 引入「程序体语句显式跳过声明
-   （报告列明，非静默）」，需 owner 确认后立 delta。
+1. **程序体语句的更干净支持（可选演进）**：sqlglot 不支持 `BEGIN...END` 过程体，
+   过程体语句现按 PARSE.001 逐条披露（warning、可 `--skip-rule` 关闭、不中断整轮，
+   2026-10-15 真链实测后修订）。如需「显式跳过声明（报告列明，非静默）」的更干净
+   形态，再立 delta。
 2. **指纹 UNION 分支折叠未实现**：design 列了「相同 UNION 折叠」，spec 未要求，
    实现覆盖 spec 全部要求（字面量/IN/VALUES/内嵌数字/注释/小写），UNION 分支不去重
    （同语句仍稳定聚合）。如需对齐 pt-q-digest 完整口径再补。
+3. **AI 评测首版精度数字待 BYOK 实测**：评测集与双层门禁已就位（tests/evals/），
+   精度地板暂设 0.5（防灾难劣化的保守值）。owner 配置 BYOK 三元组跑一次
+   `MOUDO_AI_* uv run pytest tests/evals -q`，把数字写回 evals/README.md 并校准
+   地板，该项即关闭。
 
 ## 未完成（按优先级）
 
@@ -270,8 +339,12 @@ modou verify examples/changeset-demo --baseline before.json --after after.json \
    真实场景案例两个（含本团队一次完整迭代）、文档齐备（快速上手/变更集规范/
    规则清单/MCP 接入——rules.md 与 demo-agent.md 已就绪）。发布前注意：wheel 打包
    需先 `cd ui && npm run build`（force-include 读磁盘产物）。
+2. **UI 跟进 change（2026-10-16 裁决列入）**：`ui/` 识别 `patrol_summary` 报告、
+   渲染 `ai_opinions` 观点区。报告契约已按只增不改兼容（旧报告加载零破坏），
+   此项纯增量渲染。
 
-（已完成的历史项：五 change 归档于 2026-10-15 完成——delta 已合并进
-openspec/specs/（sql-optimize / sql-lint / db-patrol / mcp-surface / report-ui，
-`openspec validate --specs --strict` 全绿），原型归档于 openspec/changes/archive/；
-「影子层接入 CI」于 2026-10-14 定调关闭（决策记录见上文「口径」），不再是未完成项。）
+（已完成的历史项：六 change 归档完成——2026-10-15 五能力（sql-optimize / sql-lint /
+db-patrol / mcp-surface / report-ui）+ 2026-10-16 ai-analyst，delta 已合并进
+openspec/specs/，`openspec validate --specs --strict` 全绿，归档件在
+openspec/changes/archive/；「影子层接入 CI」于 2026-10-14 定调关闭（决策记录见
+上文「口径」），不再是未完成项。）

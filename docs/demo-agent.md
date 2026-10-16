@@ -26,16 +26,26 @@ uv tool install 'modou[mcp]'     # MCP 表面依赖为可选 extra
 | 工具 | CLI 对应 | 说明 |
 |---|---|---|
 | `pack` | `modou pack` | 打包变更集 + 破坏性预警 |
-| `verify` | `modou verify` | 影子回放 + 三方 diff（返回 `exit_code` 与报告） |
-| `snapshot_capture` | `modou snapshot capture` | 只读结构快照（可选采样） |
-| `optimize` | `modou optimize` | 慢 SQL 影子实证优化（BYOK AI 可选） |
-| `lint` | `modou lint` | 静态 SQL 规则审核（零连接零网络） |
+| `verify` | `modou verify` | 影子回放 + 三方 diff（返回 `exit_code` 与报告；BYOK 下附失败归因观点） |
+| `snapshot_capture` | `modou snapshot capture` | 只读结构快照（可选采样；返回 `summary` 证据摘要） |
+| `optimize` | `modou optimize` | 慢 SQL 影子实证优化（BYOK AI 可选，EXPLAIN 事实预取打包） |
+| `lint` | `modou lint` | 静态 SQL 规则审核（BYOK 下附残留语句语义评审） |
 | `patrol_drift` | `modou patrol drift` | 两方结构漂移 |
 | `patrol_unused_indexes` | `modou patrol unused-indexes` | 未用/冗余索引分层判定 |
 | `patrol_slowlog` | `modou patrol slowlog` | 慢日志指纹聚合 |
+| `patrol_summarize` | `modou patrol summarize` | 跨信号综合摘要（BYOK 下附跨信号叙事） |
 | `version` | `modou version` | 版本号 |
 
 `exit_code` 语义与 CLI 一致：0=ok，1=存在差异结论（verify），2=环境或输入错误。
+证据原语清单（快照摘要/回放验收/三方 diff/EXPLAIN/lint 命中）冻结在
+`server/surface_map.EVIDENCE_PRIMITIVES`，parity 测试守护映射关系；三方 diff 与
+EXPLAIN 由 verify/optimize 的报告字段承载，不另设工具。
+
+结论分级：报告中的确定性结论决定 `exit_code`；可选键 `ai_opinions`（或文本报告
+的「AI 观点」区）是 BYOK 内置分析的观点，**永不影响退出码**，转述时保留「未实证」
+标注（格式见 formats.md「AI 观点区」）。配套工作流模板随包分发：
+`modou/skills/database-change-review/SKILL.md`（纯文本，教宿主 Agent 组合上述
+工具完成变更评审闭环）。
 
 ## 一句话链路演示（判据：单一 MCP 会话闭环）
 

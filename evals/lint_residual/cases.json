@@ -1,0 +1,49 @@
+{
+  "description": "lint 残留语义评审评测集（v0.5 design §6）：正例=规则盲区内的真风险（AI 应出观点），反例=无害语句（AI 应沉默）。语句刻意规避 26 条静态规则的覆盖面——进得了残留面才有评审资格。",
+  "cases": [
+    {
+      "id": "P1-view-chain-break",
+      "expect": "positive",
+      "risk": "DROP TABLE 使先前创建的视图断链（MySQL 允许建视图后删表，视图查询时才报错）",
+      "statements": [
+        "CREATE TABLE t2 (id int PRIMARY KEY COMMENT '主键');",
+        "CREATE VIEW v_t2 AS SELECT id FROM t2;",
+        "DROP TABLE t2;"
+      ]
+    },
+    {
+      "id": "P2-truncate-in-migration",
+      "expect": "positive",
+      "risk": "迁移链中出现 TRUNCATE（整表数据销毁，意图存疑且不可回滚）",
+      "statements": [
+        "TRUNCATE TABLE orders_archive;"
+      ]
+    },
+    {
+      "id": "P3-fk-drop-order",
+      "expect": "positive",
+      "risk": "子表外键仍引用 parent 时删除 parent（依赖冲突，规则不查外键）",
+      "statements": [
+        "CREATE TABLE parent (id int PRIMARY KEY COMMENT '主键');",
+        "CREATE TABLE child (id int PRIMARY KEY COMMENT '主键', parent_id int NOT NULL COMMENT '父表引用', CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES parent (id));",
+        "DROP TABLE parent;"
+      ]
+    },
+    {
+      "id": "N1-benign-ddl",
+      "expect": "negative",
+      "risk": "无：常规建表，主键/注释/默认值齐备",
+      "statements": [
+        "CREATE TABLE t_log (id bigint PRIMARY KEY COMMENT '主键', msg varchar(255) NOT NULL COMMENT '消息', created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间');"
+      ]
+    },
+    {
+      "id": "N2-benign-select",
+      "expect": "negative",
+      "risk": "无：显式列名的点查",
+      "statements": [
+        "SELECT id, name FROM users WHERE id = 42;"
+      ]
+    }
+  ]
+}

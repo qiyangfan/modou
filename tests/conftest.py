@@ -15,6 +15,19 @@ import pytest
 
 from modou.replay.container import ShadowMySQL, detect_container_cli
 
+
+@pytest.fixture(autouse=True)
+def _isolate_byok_env(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+    """BYOK 三元组默认从测试环境剥离：防配置了端点的开发机上普通用例发起真实网络。
+
+    needs_byok_env 标记的用例（评测门禁）保留真实环境——门禁本身按三元组齐备才跑。
+    """
+    if request.node.get_closest_marker("needs_byok_env"):
+        return
+    for key in ("MOUDO_AI_BASE_URL", "MOUDO_AI_API_KEY", "MOUDO_AI_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+
+
 IMAGE_ENV = "MOUDO_TEST_MYSQL_IMAGE"
 GATE_ENV = "MOUDO_TEST_SHADOW"
 DEFAULT_IMAGE = "mysql:8.4"

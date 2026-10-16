@@ -17,6 +17,17 @@ from modou.cli import app as cli_app
 # mcp = MCP 服务自身；ui = 长驻报告界面（均为交互式/长驻表面，ADR-0002）。
 EXCLUDED_COMMANDS = {"mcp", "ui"}
 
+# 委托面证据原语（ADR-0009 design §3）：原语 → 承载工具。三方 diff 与 EXPLAIN
+# 由 verify/optimize 的机读出口（同一报告字段）承载，不另设工具——证据工具是
+# 既有子命令机读出口的暴露，不新增 MCP 独有逻辑（1:1 契约的延伸）。
+EVIDENCE_PRIMITIVES = {
+    "snapshot_summary": "snapshot_capture",
+    "replay_verify": "verify",
+    "threeway_diff": "verify",
+    "explain": "optimize",
+    "lint_hits": "lint",
+}
+
 
 def _command_name(command) -> str:
     """typer 未显式命名时 CommandInfo.name 为 None，回落函数名（装饰器即函数名）。"""

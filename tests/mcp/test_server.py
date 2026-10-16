@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import ClassVar
 
 import pytest
 
@@ -167,3 +168,113 @@ class TestReviewRegressions:
             {"dsn": "mysql://root@127.0.0.1:1/x", "database": ["shop"], "observe_days": 0},
         )
         assert "observe_days" in message
+
+
+class TestEvidenceAlignment:
+    """证据原语与命令机读出口的一致性校验（spec ai-analyst「宿主委托面」）。"""
+
+    def test_snapshot_capture_summary_is_kernel_summary(self, tmp_path, monkeypatch) -> None:
+        """快照摘要单一事实源：MCP 工具出口 == 内核 snapshot_summary（CLI --report-json 同源）。"""
+        from modou.snapshot.model import DatabaseInventory, Snapshot, SnapshotMeta
+        from modou.snapshot.summary import snapshot_summary
+
+        captured = Snapshot(
+            format_version=2,
+            tool_version="test",
+            captured_at="2026-10-16T00:00:00+00:00",
+            meta=SnapshotMeta("8.4.11", "MySQL", "utf8mb4", "utf8mb4_0900_ai_ci", 0, ""),
+            databases={"shop": DatabaseInventory(name="shop", charset="utf8mb4", collation="")},
+        )
+        monkeypatch.setattr("modou.server.capture_to_file", lambda *args, **kwargs: captured)
+        result = call(
+            _server(),
+            "snapshot_capture",
+            {
+                "database": ["shop"],
+                "output": str(tmp_path / "s.json"),
+                "dsn": "mysql://u:p@127.0.0.1:3306",
+            },
+        )
+        assert result.data["exit_code"] == 0
+        assert result.data["summary"] == snapshot_summary(captured)
+
+    def test_lint_machine_exit_matches_cli_report(self, tmp_path) -> None:
+        """lint 命中：MCP 工具的 report 与 CLI --report-json 同源同构。"""
+        import json
+
+        from typer.testing import CliRunner
+
+        from modou.cli import app
+
+        target = tmp_path / "a.sql"
+        target.write_text("SELECT * FROM t WHERE a LIKE '%x%'\n", encoding="utf-8")
+        report_file = tmp_path / "lint.json"
+        cli_result = CliRunner().invoke(app, ["lint", str(target), "--report-json", str(report_file)])
+        assert cli_result.exit_code == 1
+        tool = call(_server(), "lint", {"paths": [str(target)]})
+        assert tool.data["exit_code"] == 1
+        assert tool.data["report"] == json.loads(report_file.read_text(encoding="utf-8"))
+
+    def test_lint_ai_opinions_flow_through_tool(self, tmp_path, monkeypatch) -> None:
+        """MCP lint 与 CLI 同车道：配置后观点进 report，退出码不受影响。"""
+        from modou.report.opinions import AiOpinion
+
+        monkeypatch.setenv("MOUDO_AI_BASE_URL", "https://api.example.com/v1")
+        monkeypatch.setenv("MOUDO_AI_API_KEY", "k")
+        monkeypatch.setenv("MOUDO_AI_MODEL", "glm-4.7")
+        opinion = AiOpinion(lane="lint", subject="a.sql:1", opinion="顺序依赖风险。", model="glm-4.7")
+
+        def fake_review(*args, **kwargs):
+            return [opinion]
+
+        monkeypatch.setattr("modou.ai.lane_lint.review_residual", fake_review)
+        target = tmp_path / "a.sql"
+        target.write_text("SELECT * FROM t WHERE a LIKE '%x'\n", encoding="utf-8")
+        result = call(_server(), "lint", {"paths": [str(target)]})
+        assert result.data["exit_code"] == 1
+        assert result.data["report"]["ai_opinions"][0]["subject"] == "a.sql:1"
+
+    def test_verify_ai_opinions_flow_through_tool(self, tmp_path, monkeypatch) -> None:
+        """MCP verify 与 CLI 同车道：配置后归因观点进 report，退出码不受影响。"""
+        from modou.report.opinions import AiOpinion
+
+        monkeypatch.setenv("MOUDO_AI_BASE_URL", "https://api.example.com/v1")
+        monkeypatch.setenv("MOUDO_AI_API_KEY", "k")
+        monkeypatch.setenv("MOUDO_AI_MODEL", "glm-4.7")
+
+        def fake_attribute(*args, **kwargs):
+            return [AiOpinion(lane="verify", subject="report", opinion="归因解释。", model="glm-4.7")]
+
+        monkeypatch.setattr("modou.ai.lane_verify.attribute_findings", fake_attribute)
+        changeset = tmp_path / "cs"
+        changeset.mkdir()
+        (changeset / "V01__a.sql").write_text("SELECT 1;\n", encoding="utf-8")
+        (changeset / "manifest.txt").write_text("V01__a.sql\n", encoding="utf-8")
+
+        class FakeOutcome:
+            exit_code = 1
+            report_json: ClassVar[dict] = {"report_version": 1, "exit_code": 1, "databases": {"shop": []}}
+
+        monkeypatch.setattr("modou.server.run_verify", lambda *args, **kwargs: FakeOutcome())
+        from modou.snapshot.model import DatabaseInventory, Snapshot, SnapshotMeta, snapshot_to_json
+
+        baseline = tmp_path / "b.json"
+        baseline.write_text(
+            snapshot_to_json(
+                Snapshot(
+                    format_version=2,
+                    tool_version="t",
+                    captured_at="c",
+                    meta=SnapshotMeta("8.4.11", "MySQL", "utf8mb4", "utf8mb4_0900_ai_ci", 0, ""),
+                    databases={"shop": DatabaseInventory(name="shop", charset="utf8mb4", collation="")},
+                )
+            ),
+            encoding="utf-8",
+        )
+        result = call(
+            _server(),
+            "verify",
+            {"changeset_dir": str(changeset), "baseline": str(baseline), "after": str(baseline)},
+        )
+        assert result.data["exit_code"] == 1
+        assert result.data["report"]["ai_opinions"][0]["subject"] == "report"

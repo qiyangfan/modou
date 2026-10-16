@@ -7,7 +7,12 @@ import pytest
 pytest.importorskip("fastmcp", reason="MCP surface tests need the fastmcp dependency")
 
 from modou.server import build_mcp_server
-from modou.server.surface_map import EXCLUDED_COMMANDS, cli_command_map, registered_cli_names
+from modou.server.surface_map import (
+    EVIDENCE_PRIMITIVES,
+    EXCLUDED_COMMANDS,
+    cli_command_map,
+    registered_cli_names,
+)
 
 
 def _tool_names() -> set[str]:
@@ -72,3 +77,25 @@ class TestDescriptionGuard:
         assert descriptions, "no tools registered"
         empty = [name for name, text in descriptions.items() if not text.strip()]
         assert not empty, f"tools with empty description: {empty}"
+
+
+class TestEvidenceParity:
+    """委托面证据原语（ADR-0009 design §3）：原语清单冻结，映射目标必须已注册。
+
+    三方 diff 与 EXPLAIN 由 verify/optimize 的机读出口承载（同一报告字段），
+    不另设工具——这是 1:1 契约的延伸而非破坏（proposal「受影响决策」）。
+    """
+
+    def test_primitive_set_frozen(self) -> None:
+        assert set(EVIDENCE_PRIMITIVES) == {
+            "snapshot_summary",
+            "replay_verify",
+            "threeway_diff",
+            "explain",
+            "lint_hits",
+        }
+
+    def test_primitives_point_to_registered_tools(self) -> None:
+        tools = _tool_names()
+        for primitive, tool in EVIDENCE_PRIMITIVES.items():
+            assert tool in tools, f"evidence primitive {primitive!r} points to unregistered tool {tool!r}"

@@ -363,11 +363,15 @@ def _render_table_options(options: tuple) -> str:
 
 
 def _render_column(column: ColumnDef) -> str:
+    # 不变量：凡是参与条目相等性比较的字段（ColumnDef 除 name 外全部）都必须出现在
+    # 渲染文本里——collation/comment 缺席时两侧渲染同文，读者无法理解差异何在。
     nullability = "NULL" if column.nullable else "NOT NULL"
     default = f" default={column.default!r}" if column.default is not None else ""
     extra = f" extra={column.extra}" if column.extra else ""
     generated = f" as({column.generation_expression})" if column.generation_expression else ""
-    return f"{column.column_type} {nullability}{default}{extra}{generated} ordinal={column.ordinal}"
+    collation = f" collation={column.collation}" if column.collation else ""
+    comment = f" comment={column.comment!r}" if column.comment else ""
+    return f"{column.column_type} {nullability}{default}{extra}{generated}{collation}{comment} ordinal={column.ordinal}"
 
 
 def _render_index(index: IndexDef) -> str:

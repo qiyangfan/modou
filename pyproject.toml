@@ -62,3 +62,6 @@ select = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "needs_byok_env: 保留真实 BYOK 环境变量（评测门禁专用，其余用例默认剥离）",
+]

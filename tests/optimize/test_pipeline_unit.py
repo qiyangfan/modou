@@ -209,3 +209,43 @@ class TestAdvisorDroppedAttribution:
         assert dropped and dropped[0].startswith("ai ")
         _, dropped2 = resolve_candidates([IndexCandidate("shop", "ghost", ["a"], "r", source="rule")], tables_map)
         assert dropped2 and dropped2[0].startswith("rule ")
+
+
+class TestAdvisorExplainFactsWiring:
+    def test_measure_statement_passes_baseline_plan_facts(self, monkeypatch) -> None:
+        """事实预取打包：管线把基线 EXPLAIN 事实传给候选生成（受控多轮的确定性半区）。"""
+
+        import modou.optimize.pipeline as pipeline_module
+        from modou.optimize.candidates import analyze_statement
+        from modou.optimize.explain import ExplainPlan
+
+        captured: dict = {}
+
+        def fake_fetch(config, sql, schema_summary, *, explain_facts=None, **kwargs):
+            captured["explain_facts"] = explain_facts
+            return []
+
+        monkeypatch.setattr(pipeline_module, "maybe_fetch_candidates", fake_fetch)
+        monkeypatch.setattr(
+            pipeline_module,
+            "explain_json",
+            lambda conn, sql: ExplainPlan(
+                query_cost=42.0, table_accesses=[{"table": "orders", "access_type": "ALL", "rows": 2000}]
+            ),
+        )
+        monkeypatch.setattr(pipeline_module, "_reference_actual_ms", lambda conn, analysis: None)
+
+        analysis = analyze_statement("SELECT * FROM orders WHERE user_id = 7", "shop")
+        report = pipeline_module._measure_statement(
+            conn=None,
+            position=1,
+            analysis=analysis,
+            tables_map={"shop": {}},
+            schema_summary=[],
+            advisor_config=object(),
+            index_count_limit=10,
+            advisor_dropped=[],
+        )
+        assert report["baseline"]["cost"] == 42.0
+        assert captured["explain_facts"]["query_cost"] == 42.0
+        assert captured["explain_facts"]["table_accesses"][0]["table"] == "orders"

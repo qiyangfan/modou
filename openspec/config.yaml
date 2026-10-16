@@ -8,8 +8,8 @@ context: |
   - sqlglot 为唯一 SQL 解析器（仅用于预警与 lint，结论不依赖解析）
   - 影子库：同版本容器 MySQL（本地 podman/testcontainers），快照灌入 + 回放
   - 方言：MySQL 先行（ADR-0005），PostgreSQL 次之
-  架构决策见 docs/adr/（ADR-0001~0008）；竞品依据见 docs/research-2026-10.md。关键红线：
-  - 确定性代码当裁判，AI 只当顾问；AI 建议未过实证关不得进报告（ADR-0003）
+  架构决策见 docs/adr/（ADR-0001~0009）；竞品依据见 docs/research-2026-10.md。关键红线：
+  - 确定性代码当裁判，AI 当分析师；AI 观点不影响退出码，建议未过实证关不得称有效（ADR-0003/0009）
   - 期望态只能由回放推导，DDL 解析仅作预警（ADR-0004）
   - 零平台化：无常驻服务、无账号体系、报告 UI 仅 localhost（ADR-0002）
   - 多实例多库是默认假设（ADR-0008）
