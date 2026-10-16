@@ -81,26 +81,34 @@ def complete(
     *,
     transport: Transport = default_transport,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    attempts: int = 2,
 ) -> str:
     """发送完整 chat/completions 请求体：返回助手回复文本；失败抛 AiCallError。
 
     请求体由调用方（车道模块）构造——提示词是车道资产，客户端不拼装业务语义。
+    attempts 是传输层尝试总次数：默认 2 次，吸收一过性通道故障（连接重置/响应半途
+    截断——首版 BYOK 实测出现过一次）；持续性失败（鉴权/端点错误）多花一次请求后
+    原样抛出，由调用方降级。如未来出现高频限流再引入退避，不预设。
     """
-    try:
-        response = transport(
-            config.base_url.rstrip("/") + "/chat/completions",
-            config.api_key,
-            payload,
-            timeout_seconds,
-        )
-        content = response["choices"][0]["message"]["content"]
-    except AiCallError:
-        raise
-    except Exception as exc:  # fail-safe 边界：传输层任何异常（含 http.client.HTTPException 族）都归入调用失败
-        raise AiCallError(str(exc) or exc.__class__.__name__) from exc
-    if content is None:
-        raise AiCallError("empty content in AI response")
-    return str(content)
+    last_error: AiCallError | None = None
+    for _ in range(max(1, attempts)):
+        try:
+            response = transport(
+                config.base_url.rstrip("/") + "/chat/completions",
+                config.api_key,
+                payload,
+                timeout_seconds,
+            )
+            content = response["choices"][0]["message"]["content"]
+            if content is None:
+                raise AiCallError("empty content in AI response")
+            return str(content)
+        except AiCallError as exc:
+            last_error = exc
+        except Exception as exc:  # fail-safe 边界：传输层任何异常（含 http.client.HTTPException 族）都归入调用失败
+            last_error = AiCallError(str(exc) or exc.__class__.__name__)
+    # attempts >= 1 保证循环至少执行一轮，last_error 必已赋值
+    raise last_error
 
 
 def chat_content(

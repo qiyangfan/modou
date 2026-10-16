@@ -1,0 +1,48 @@
+{
+  "eval": "lint_residual",
+  "generated_at": "2026-10-16T04:20:42+00:00",
+  "model": "qwen-plus",
+  "accuracy": 1.0,
+  "cases": [
+    {
+      "id": "P1-view-chain-break",
+      "expect": "positive",
+      "flagged": true,
+      "degraded": false,
+      "degraded_reason": null,
+      "ok": true
+    },
+    {
+      "id": "P2-truncate-in-migration",
+      "expect": "positive",
+      "flagged": true,
+      "degraded": false,
+      "degraded_reason": null,
+      "ok": true
+    },
+    {
+      "id": "P3-fk-drop-order",
+      "expect": "positive",
+      "flagged": true,
+      "degraded": false,
+      "degraded_reason": null,
+      "ok": true
+    },
+    {
+      "id": "N1-benign-ddl",
+      "expect": "negative",
+      "flagged": false,
+      "degraded": false,
+      "degraded_reason": null,
+      "ok": true
+    },
+    {
+      "id": "N2-benign-select",
+      "expect": "negative",
+      "flagged": false,
+      "degraded": false,
+      "degraded_reason": null,
+      "ok": true
+    }
+  ]
+}

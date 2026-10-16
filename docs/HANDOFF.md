@@ -249,7 +249,9 @@ modou verify examples/changeset-demo --baseline before.json --after after.json \
   随包分发（importlib.resources 测试守护，工作流覆盖全部证据原语）。
 - **评测门禁**：tests/evals/ 双层——确定性半区恒跑（数据集聚合性 + 上下文工程
   回归 + 提示词契约字符串），BYOK 半区三元组齐备才跑（真实端点逐案评审、精度
-  落盘 evals/lint_residual/last-run.json、劣化即失败）。数据集设计教训：
+  落盘 evals/lint_residual/last-run.json、劣化即失败）。客户端 complete() 默认
+  重试一次（attempts=2）吸收一过性通道故障——实测冷启动首跑出现过 1 次瞬时降级、
+  其后 58 次调用零复现，降级原因随 last-run.json 落盘可归因。数据集设计教训：
   正例必须真在规则盲区——首版数据集被 COL.005（列缺注释）拦住，语句需按
   docs/rules.md 逐条规避后才算「残留面样本」。
 - 未配置 BYOK 全车道回归：`ai_opinions` 键缺席、文本无观点区、退出码不变
@@ -328,10 +330,6 @@ modou verify examples/changeset-demo --baseline before.json --after after.json \
 2. **指纹 UNION 分支折叠未实现**：design 列了「相同 UNION 折叠」，spec 未要求，
    实现覆盖 spec 全部要求（字面量/IN/VALUES/内嵌数字/注释/小写），UNION 分支不去重
    （同语句仍稳定聚合）。如需对齐 pt-q-digest 完整口径再补。
-3. **AI 评测首版精度数字待 BYOK 实测**：评测集与双层门禁已就位（tests/evals/），
-   精度地板暂设 0.5（防灾难劣化的保守值）。owner 配置 BYOK 三元组跑一次
-   `MOUDO_AI_* uv run pytest tests/evals -q`，把数字写回 evals/README.md 并校准
-   地板，该项即关闭。
 
 ## 未完成（按优先级）
 
@@ -347,4 +345,6 @@ modou verify examples/changeset-demo --baseline before.json --after after.json \
 db-patrol / mcp-surface / report-ui）+ 2026-10-16 ai-analyst，delta 已合并进
 openspec/specs/，`openspec validate --specs --strict` 全绿，归档件在
 openspec/changes/archive/；「影子层接入 CI」于 2026-10-14 定调关闭（决策记录见
-上文「口径」），不再是未完成项。）
+上文「口径」）；「AI 评测首版精度」于 2026-10-16 实测关闭——qwen-plus @ DashScope
+兼容模式，首测 0.8（1 案瞬时降级）→ 复跑 1.0，`ACCURACY_FLOOR` 校准为 0.8，
+数字留痕 evals/README.md 与 last-run.json；不再是待确认项。）

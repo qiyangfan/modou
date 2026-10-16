@@ -4,8 +4,9 @@
 - 确定性半区（恒跑）：数据集聚合性 + 上下文工程回归（残留面不丢语句、反例确实
   规则零命中、提示词契约字符串在场）——任何一层坏掉，门禁即失败，零密钥可跑；
 - BYOK 半区（MOUDO_AI_* 三元组齐备才跑，镜像影子门禁模式）：真实端点逐案评审、
-  计精度、落盘 last-run.json、劣化即失败。首版精度数字需 BYOK 实测产生
-  （待确认项：owner 配置端点后运行一次，把数字写回本文件头并校准精度下限）。
+  计精度、落盘 last-run.json、劣化即失败。首版精度实测于 2026-10-16
+  （qwen-plus @ DashScope：复跑 1.0，数字见 evals/README.md），
+  地板据此校准。
 """
 
 from __future__ import annotations
@@ -26,8 +27,8 @@ from modou.lint.engine import Thresholds, lint_sql_text, residual_statements
 EVAL_DIR = Path(__file__).resolve().parents[2] / "evals" / "lint_residual"
 CASES = json.loads((EVAL_DIR / "cases.json").read_text(encoding="utf-8"))["cases"]
 
-# 精度下限：首版 BYOK 实测数字产生后校准（当前为防灾难性劣化的保守地板）
-ACCURACY_FLOOR = 0.5
+# 精度下限：2026-10-16 qwen-plus 首测校准（5 案各 0.2，容忍单案回归，两案劣化即阻塞）
+ACCURACY_FLOOR = 0.8
 
 
 def _units(case: dict) -> list[StatementUnit]:
@@ -90,7 +91,14 @@ class TestByokEvaluation:
             ok = flagged == expected and not degraded_hit
             correct += ok
             results.append(
-                {"id": case["id"], "expect": case["expect"], "flagged": flagged, "degraded": degraded_hit, "ok": ok}
+                {
+                    "id": case["id"],
+                    "expect": case["expect"],
+                    "flagged": flagged,
+                    "degraded": degraded_hit,
+                    "degraded_reason": next((o.degraded_reason for o in opinions if o.status != "ok"), None),
+                    "ok": ok,
+                }
             )
         accuracy = correct / len(CASES)
         payload = {
