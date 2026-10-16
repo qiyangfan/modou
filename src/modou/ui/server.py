@@ -22,6 +22,7 @@ SUPPORTED_REPORTS: dict[str, int] = {
     "patrol_drift": 1,
     "patrol_unused_indexes": 1,
     "patrol_slowlog": 1,
+    "patrol_summary": 1,
 }
 
 # 回环绑定白名单：仅 IPv4 回环（::1 需要 IPv6 栈与 getfqdn 配合，且浏览器侧地址

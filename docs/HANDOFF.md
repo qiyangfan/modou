@@ -337,9 +337,6 @@ modou verify examples/changeset-demo --baseline before.json --after after.json \
    真实场景案例两个（含本团队一次完整迭代）、文档齐备（快速上手/变更集规范/
    规则清单/MCP 接入——rules.md 与 demo-agent.md 已就绪）。发布前注意：wheel 打包
    需先 `cd ui && npm run build`（force-include 读磁盘产物）。
-2. **UI 跟进 change（2026-10-16 裁决列入）**：`ui/` 识别 `patrol_summary` 报告、
-   渲染 `ai_opinions` 观点区。报告契约已按只增不改兼容（旧报告加载零破坏），
-   此项纯增量渲染。
 
 （已完成的历史项：六 change 归档完成——2026-10-15 五能力（sql-optimize / sql-lint /
 db-patrol / mcp-surface / report-ui）+ 2026-10-16 ai-analyst，delta 已合并进
@@ -347,4 +344,5 @@ openspec/specs/，`openspec validate --specs --strict` 全绿，归档件在
 openspec/changes/archive/；「影子层接入 CI」于 2026-10-14 定调关闭（决策记录见
 上文「口径」）；「AI 评测首版精度」于 2026-10-16 实测关闭——qwen-plus @ DashScope
 兼容模式，首测 0.8（1 案瞬时降级）→ 复跑 1.0，`ACCURACY_FLOOR` 校准为 0.8，
-数字留痕 evals/README.md 与 last-run.json；不再是待确认项。）
+数字留痕 evals/README.md 与 last-run.json；「UI 跟进：patrol_summary 识别 +
+ai_opinions 观点区」于 2026-10-16 交付并归档（delta 已并入 report-ui spec）；不再是未完成项。）

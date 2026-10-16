@@ -2,7 +2,7 @@
 
 ## Purpose
 本地薄报告层：把 modou 产出的各类报告 JSON 经仅回环监听的只读网页渲染，
-零外部请求、零存储；绑定只允许 IPv4 回环，报告内容（schema 元数据）不出本机。 add-report-ui. Update Purpose after archive.
+零外部请求、零存储；绑定只允许 IPv4 回环，报告内容（schema 元数据）不出本机。
 
 ## Requirements
 
@@ -71,3 +71,29 @@ SHALL NOT 提供编辑或执行操作。无法识别的报告类型或版本 SHA
 - **GIVEN** 传入的报告文件路径不存在
 - **WHEN** 用户启动报告界面
 - **THEN** 以退出码 2 失败并指明该路径
+
+### Requirement: 综合巡检与 AI 观点区渲染
+
+报告界面 SHALL 渲染综合巡检报告（report_kind=patrol_summary）：逐信号摘要
+（漂移 / 未用索引 / 慢日志）、摘要内对象与指纹清单、输入来源映射。报告数据含
+`ai_opinions` 观点数组时 SHALL 渲染单列「AI 观点」区，逐条展示车道、主题、
+来源模型，降级条目 SHALL 展示降级原因；观点区 SHALL 标注「模型输出·未经实证·
+不影响退出码」与确定性结论分级。报告数据无该字段或为空数组 SHALL 不渲染观点区。
+
+#### Scenario: 渲染综合巡检报告
+
+- **GIVEN** 一份 patrol_summary 报告文件
+- **WHEN** 用户在报告界面打开
+- **THEN** 展示三信号摘要与清单，并列明各信号的输入来源
+
+#### Scenario: 渲染 AI 观点区
+
+- **GIVEN** 一份数据中带非空 ai_opinions 数组的报告
+- **WHEN** 渲染该报告
+- **THEN** 观点单列展示，逐条附车道、主题与来源模型，降级条目展示降级原因
+
+#### Scenario: 无观点不渲染
+
+- **GIVEN** 一份数据中无 ai_opinions 字段或其为空数组的报告
+- **WHEN** 渲染该报告
+- **THEN** 页面不出现观点区

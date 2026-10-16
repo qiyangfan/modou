@@ -172,6 +172,45 @@ const slowlogPayload: ReportPayload = {
   },
 };
 
+const summaryPayload: ReportPayload = {
+  id: "r7",
+  kind: "patrol_summary",
+  version: 1,
+  source: "summary.json",
+  data: {
+    report_kind: "patrol_summary",
+    report_version: 1,
+    exit_code: 1,
+    generated_at: "2026-10-16T00:00:00+00:00",
+    inputs: { drift: "drift.json", unused: null, slowlog: "slow.log.json" },
+    signals: {
+      drift: {
+        exit_code: 1,
+        added: 1,
+        removed: 0,
+        changed: 2,
+        objects: [{ database: "shop", object_type: "table", object_name: "orders", category: "added" }],
+      },
+      unused: {
+        exit_code: 0,
+        uptime_seconds: 604800,
+        observe_days: 7,
+        confirmed_unused: 2,
+        low_use: 1,
+        insufficient_data: 0,
+        redundant: 1,
+        items: [{ database: "shop", table: "orders", index: "idx_dead", status: "confirmed_unused" }],
+      },
+      slowlog: {
+        exit_code: 0,
+        entries_parsed: 42,
+        fingerprints: 5,
+        top: [{ fingerprint: "select * from orders where user_id = ?", count: 9, query_time_total: 12.5, rows_examined_total: 900000 }],
+      },
+    },
+  },
+};
+
 describe("report views", () => {
   beforeEach(() => {
     document.body.replaceChildren();
@@ -222,6 +261,25 @@ describe("report views", () => {
     renderReport(root, slowlogPayload);
     expect(root.textContent).toContain("次数 2");
     expect(root.textContent).toContain("user_id = ?");
+  });
+
+  it("patrol summary view renders per-signal digests and input sources", () => {
+    const root = mount();
+    renderReport(root, summaryPayload);
+    const text = root.textContent ?? "";
+    expect(text).toContain("综合巡检");
+    expect(text).toContain("退出码 1");
+    expect(text).toContain("漂移");
+    expect(text).toContain("新增 1");
+    expect(text).toContain("定义变更 2");
+    expect(text).toContain("确认未用 2");
+    expect(text).toContain("冗余 1");
+    expect(text).toContain("指纹榜 5");
+    expect(text).toContain("user_id = ?");
+    expect(text).toContain("shop.table:orders");
+    expect(text).toContain("idx_dead");
+    expect(text).toContain("drift.json");
+    expect(text).toContain("slow.log.json");
   });
 });
 
@@ -315,6 +373,65 @@ describe("review regressions", () => {
   });
 });
 
+
+describe("ai opinions section", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const opinions = [
+    {
+      lane: "verify",
+      subject: "shop.table:orders",
+      opinion: "索引 idx_user_amount 疑似漏执行，可重放该语句补齐。",
+      source: "ai",
+      model: "qwen-plus",
+      status: "ok",
+      degraded_reason: null,
+    },
+    {
+      lane: "lint",
+      subject: "V02.sql:3",
+      opinion: "",
+      source: "ai",
+      model: "qwen-plus",
+      status: "degraded",
+      degraded_reason: "unparseable reply (no JSON array)",
+    },
+  ];
+
+  it("renders opinions section with lane, subject, model and degraded reason", () => {
+    const root = mount();
+    renderReport(root, {
+      ...verifyPayload,
+      data: { ...verifyPayload.data, ai_opinions: opinions },
+    });
+    const text = root.textContent ?? "";
+    expect(text).toContain("AI 观点");
+    expect(text).toContain("模型输出·未经实证·不影响退出码");
+    expect(text).toContain("verify · shop.table:orders");
+    expect(text).toContain("qwen-plus");
+    expect(text).toContain("疑似漏执行");
+    expect(text).toContain("降级");
+    expect(text).toContain("unparseable reply (no JSON array)");
+  });
+
+  it("renders no opinions section when field missing or empty", () => {
+    const plain = mount();
+    renderReport(plain, withOpinions());
+    expect(plain.textContent).not.toContain("AI 观点");
+
+    const empty = mount();
+    renderReport(empty, withOpinions([]));
+    expect(empty.textContent).not.toContain("AI 观点");
+  });
+
+  function withOpinions(opinions?: unknown[]): ReportPayload {
+    const data: Record<string, unknown> = { ...verifyPayload.data };
+    if (opinions !== undefined) data.ai_opinions = opinions;
+    return { ...verifyPayload, data } as ReportPayload;
+  }
+});
 
 describe("round-2 review regressions", () => {
   beforeEach(() => {

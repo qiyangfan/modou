@@ -354,6 +354,8 @@ optimize（候选生成，advisor 节既有）四车道可附 AI 分析。契约
 
 ## 报告 UI 类型识别口径
 
-报告加载按显式 `report_kind` 识别；**verify（v0.1 冻结契约）是唯一没有
+报告加载按显式 `report_kind` 识别；支持清单由 `ui/server.py` 的 `SUPPORTED_REPORTS`
+单源（现含 verify / optimize / lint / patrol_drift / patrol_unused_indexes /
+patrol_slowlog / patrol_summary）；**verify（v0.1 冻结契约）是唯一没有
 report_kind 字段的报告**，按 `summary.missing_execution` 形状 + `report_version=1`
 识别——新报告类型不得省略 report_kind，否则会被误判为 verify。

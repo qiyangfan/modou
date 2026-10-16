@@ -30,6 +30,13 @@ VERIFY_OK = {
 OPTIMIZE_OK = {"report_kind": "optimize", "report_version": 1, "exit_code": 0, "databases": {}}
 LINT_OK = {"report_kind": "lint", "report_version": 1, "exit_code": 0, "summary": {"hits": 0}, "hits": []}
 DRIFT_OK = {"report_kind": "patrol_drift", "report_version": 1, "exit_code": 0, "databases": {}}
+SUMMARY_OK = {
+    "report_kind": "patrol_summary",
+    "report_version": 1,
+    "exit_code": 1,
+    "inputs": {"drift": "drift.json", "unused": None, "slowlog": None},
+    "signals": {"drift": {"exit_code": 1, "added": 1, "removed": 0, "changed": 0, "objects": []}},
+}
 
 
 class TestLoadReport:
@@ -43,6 +50,7 @@ class TestLoadReport:
             ("optimize.json", OPTIMIZE_OK),
             ("lint.json", LINT_OK),
             ("drift.json", DRIFT_OK),
+            ("summary.json", SUMMARY_OK),
         ):
             report = load_report(_write_report(tmp_path, name, payload))
             assert report.kind == payload["report_kind"]

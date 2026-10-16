@@ -6,7 +6,8 @@ export type ReportKind =
   | "lint"
   | "patrol_drift"
   | "patrol_unused_indexes"
-  | "patrol_slowlog";
+  | "patrol_slowlog"
+  | "patrol_summary";
 
 export interface ReportMeta {
   id: string;
@@ -26,7 +27,66 @@ export const KIND_LABELS: Record<ReportKind, string> = {
   patrol_drift: "漂移巡检",
   patrol_unused_indexes: "索引巡检",
   patrol_slowlog: "慢日志聚合",
+  patrol_summary: "综合巡检",
 };
+
+// AI 观点（report.opinions.AiOpinion 契约）：两级标注的呈现面，渲染只读不计算
+export interface AiOpinion {
+  lane: string;
+  subject: string;
+  opinion: string;
+  source: string;
+  model: string;
+  status: string;
+  degraded_reason: string | null;
+}
+
+export interface PatrolSummaryObject {
+  database: string;
+  object_type: string;
+  object_name: string;
+  category: string;
+}
+
+export interface PatrolSummaryItem {
+  database: string;
+  table: string;
+  index: string;
+  status: string;
+}
+
+export interface PatrolSummaryTop {
+  fingerprint: string;
+  count: number;
+  query_time_total: number;
+  rows_examined_total: number;
+}
+
+export interface PatrolSummarySignals {
+  drift?: {
+    exit_code: number;
+    added: number;
+    removed: number;
+    changed: number;
+    objects: PatrolSummaryObject[];
+  };
+  unused?: {
+    exit_code: number;
+    uptime_seconds: number | null;
+    observe_days: number;
+    confirmed_unused: number;
+    low_use: number;
+    insufficient_data: number;
+    redundant: number;
+    items: PatrolSummaryItem[];
+  };
+  slowlog?: {
+    exit_code: number;
+    entries_parsed: number;
+    fingerprints: number;
+    top: PatrolSummaryTop[];
+  };
+}
 
 export interface VerifyDetail {
   dimension: string;

@@ -1,10 +1,12 @@
 // 四类车道视图：只读渲染，全部数据来自所加载的报告（零外部请求）
 // 渲染入口（renderReport）对畸形报告兜底为错误卡，各 renderer 内部字段访问带缺省
 import type {
+  AiOpinion,
   LintHit,
   OptimizeStatement,
   PatrolDriftConclusion,
   PatrolSlowlogTop,
+  PatrolSummarySignals,
   PatrolUsage,
   ReportPayload,
   VerifyConclusion,
@@ -314,6 +316,90 @@ export function renderPatrolSlowlog(root: HTMLElement, payload: ReportPayload): 
   });
 }
 
+// ── 综合巡检 ────────────────────────────────────────────────────────────────
+export function renderPatrolSummary(root: HTMLElement, payload: ReportPayload): void {
+  const data = payload.data as {
+    exit_code: number;
+    generated_at?: string;
+    inputs?: Record<string, string | null>;
+    signals: PatrolSummarySignals;
+  };
+  root.appendChild(card(el("span", "badge kind", `退出码 ${data.exit_code ?? "-"}`)));
+  const sources = Object.entries(data.inputs ?? {})
+    .map(([signal, source]) => `${signal}=${source ?? "—"}`)
+    .join(" · ");
+  if (sources) {
+    root.appendChild(card(el("span", "muted", `输入来源 ${sources}`)));
+  }
+  const signals = data.signals ?? {};
+  const categoryLabel: Record<string, string> = { added: "新增", removed: "缺失", changed: "定义变更" };
+  const statusLabel: Record<string, string> = {
+    confirmed_unused: "确认未用",
+    low_use: "疑似低用",
+    insufficient_data: "数据不足",
+    excluded_unique: "排除（唯一性）",
+    excluded_fk: "排除（外键）",
+  };
+  if (signals.drift) {
+    const s = signals.drift;
+    root.appendChild(card(el("span", "summary-row", `漂移：新增 ${s.added} · 缺失 ${s.removed} · 定义变更 ${s.changed}`)));
+    for (const o of s.objects ?? []) {
+      root.appendChild(
+        card(
+          el("span", `badge ${o.category}`, categoryLabel[o.category] ?? o.category),
+          el("code", undefined, `${o.database}.${o.object_type}:${o.object_name}`),
+        ),
+      );
+    }
+  }
+  if (signals.unused) {
+    const s = signals.unused;
+    root.appendChild(
+      card(
+        el(
+          "span",
+          "summary-row",
+          `未用索引：确认未用 ${s.confirmed_unused} · 疑似低用 ${s.low_use} · 数据不足 ${s.insufficient_data} · 冗余 ${s.redundant}`,
+        ),
+      ),
+    );
+    for (const item of s.items ?? []) {
+      root.appendChild(
+        card(el("code", undefined, `${item.database}.${item.table}.${item.index}`), el("span", "muted", statusLabel[item.status] ?? item.status)),
+      );
+    }
+  }
+  if (signals.slowlog) {
+    const s = signals.slowlog;
+    root.appendChild(card(el("span", "summary-row", `慢日志：解析条目 ${s.entries_parsed} · 指纹榜 ${s.fingerprints}`)));
+    for (const t of s.top ?? []) {
+      root.appendChild(
+        card(
+          el("strong", undefined, `次数 ${t.count} · 累计 ${t.query_time_total.toFixed(3)}s · 扫描 ${t.rows_examined_total} 行`),
+          el("div", "muted", t.fingerprint),
+        ),
+      );
+    }
+  }
+  root.appendChild(card(el("div", "muted", "明细为摘要截断（对象 ≤20 · 指纹前 3），完整结论见各信号报告。")));
+}
+
+// ── AI 观点区（两级标注的呈现面：无观点恒等，不做二次计算）──────────────────
+export function renderAiOpinions(root: HTMLElement, data: Record<string, unknown>): void {
+  const opinions = data.ai_opinions;
+  if (!Array.isArray(opinions) || opinions.length === 0) return;
+  root.appendChild(el("h2", undefined, "AI 观点（模型输出·未经实证·不影响退出码）"));
+  for (const raw of opinions as AiOpinion[]) {
+    const head =
+      raw.status === "degraded"
+        ? el("span", "badge warning", `降级（${raw.degraded_reason ?? "未知原因"}）`)
+        : el("span", "badge unverified", "AI 观点");
+    root.appendChild(
+      card(head, el("span", "muted", `${raw.lane} · ${raw.subject}`), el("div", undefined, raw.opinion), el("span", "muted", `来源 ${raw.source}:${raw.model}`)),
+    );
+  }
+}
+
 export function renderReport(root: HTMLElement, payload: ReportPayload): void {
   root.replaceChildren();
   root.appendChild(el("h2", undefined, `${KIND_LABELS[payload.kind] ?? payload.kind}（${payload.source}）`));
@@ -337,11 +423,15 @@ export function renderReport(root: HTMLElement, payload: ReportPayload): void {
       case "patrol_slowlog":
         renderPatrolSlowlog(root, payload);
         break;
+      case "patrol_summary":
+        renderPatrolSummary(root, payload);
+        break;
       default: {
         const unknown: never = payload.kind;
         root.appendChild(card(el("span", "badge error", `未知报告类型：${String(unknown)}`)));
       }
     }
+    renderAiOpinions(root, payload.data);
   } catch {
     // kind/version 门禁放行但缺契约字段的报告（手写/截断/旧版）：错误卡而非白屏
     root.appendChild(
