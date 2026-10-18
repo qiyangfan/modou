@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           # 3.12 = requires-python 地板，保地板可装；本地开发用 3.13 亦可
           python-version: "3.12"

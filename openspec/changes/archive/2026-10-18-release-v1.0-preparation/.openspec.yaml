@@ -1,0 +1,4 @@
+schema: spec-driven
+# 发布准备：零运行行为变化（报告契约/退出码/MCP 表面/CLI 输出不动），
+# 交付物为文档/案例/版本元数据——无 spec delta
+skip_specs: true

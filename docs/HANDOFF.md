@@ -1,6 +1,18 @@
 # HANDOFF — modou
 
-## 现状（2026-10-16，v0.1~v0.5 全部落地 + 六能力 spec 已归档）
+## 现状（2026-10-18，v1.0.0 定版：四车道 + 三表面 + AI 分析师层全落地）
+
+**v1.0 发布准备（2026-10-18 归档，release-v1.0-preparation）**：版本定版 1.0.0；
+双语 README（README.md / README.en.md）；quickstart.md + changeset-spec.md；
+案例两个（examples/changeset-demo 交棒漏执行验收 + examples/optimize-demo 优化
+实证两级状态，输出为本机影子库真实运行结果）；**修复 sdist 分发缺陷**（sdist 增
+force-include，此前下游从 sdist 构建 wheel 必失败）。**剩余一步：`uv publish`
+实际上传**——本机无 PyPI 凭据，凭据就绪后按发布清单执行（归档件
+openspec/changes/archive/2026-10-18-release-v1.0-preparation/tasks.md §5.3）。
+工具链同日全量升级（2026-10-18-upgrade-toolchain-latest-stable 归档）：UI 四件套
+大版本（vitest 5 / eslint 10 / TS 6 / jsdom 30，零适配全绿）、Python 锁补丁刷新、
+ADR-0006 增修订记录（容器编排手搓 CLI 为准）；CI Node 24→26 搁置至 2026-10-28
+Node 26 进 LTS 后执行（归档件 tasks §3.1）。
 
 **AI 分析师层（v0.5，2026-10-16 落地并归档）**：ADR-0009 定调「AI 当分析师——
 确定性工程 × AI 混合架构」，部分取代 ADR-0003 的 AI 职责面（确定性裁判、实证关、
@@ -135,7 +147,7 @@ ADR 0001~0009、AGENTS.md（门禁单源）、CI（core 门禁 + ui Node 24 门�
 ## 可复现
 
 ```bash
-cd ~/workspace/longzhong/modou
+cd ~/longzhong/modou
 uv sync                        # 安装依赖（生成 uv.lock 与 .venv；fastmcp 在 dev 组，MCP 测试可直接跑）
 uv run pytest                  # 单测（容器层默认跳过）
 MOUDO_TEST_SHADOW=1 uv run pytest tests/integration tests/mcp/test_demo_flow.py   # 影子库全量（本机 podman）
@@ -331,18 +343,28 @@ modou verify examples/changeset-demo --baseline before.json --after after.json \
    实现覆盖 spec 全部要求（字面量/IN/VALUES/内嵌数字/注释/小写），UNION 分支不去重
    （同语句仍稳定聚合）。如需对齐 pt-q-digest 完整口径再补。
 
+（两条均于 2026-10-18 裁决：**不做**。1 的披露机制已满足「显式非静默」，无真实
+痛点证据，1.0 冻结期不引入新行为面；2 的聚合稳定性已保证、spec 全覆盖，出现
+真实对齐需求再立 delta。状态从「待确认」转为「已裁决关闭」，勿再重复上报。）
+
 ## 未完成（按优先级）
 
-1. **v1.0 对外发布**：PyPI 发布、`uv tool install modou` 一条命令、中英双语 README、
-   真实场景案例两个（含本团队一次完整迭代）、文档齐备（快速上手/变更集规范/
-   规则清单/MCP 接入——rules.md 与 demo-agent.md 已就绪）。发布前注意：wheel 打包
-   需先 `cd ui && npm run build`（force-include 读磁盘产物）。
+1. **v1.0 对外发布——仅剩 `uv publish` 一步**：发布物、文档、案例全部就绪并
+   归档（见上文「现状」）。凭据就绪后按归档件 tasks §5.3 清单执行：build →
+   核对 → `uv publish --token <PYPI_TOKEN>` → 发布后 `uv tool install modou`
+   验证 → 打 tag `v1.0.0`（等 owner 指令）。PyPI 名 `modou` 已确认可用
+   （2026-10-18）。CI Node 26 升级（归档件 §3.1）等 2026-10-28 LTS 生效后执行。
 
 （已完成的历史项：六 change 归档完成——2026-10-15 五能力（sql-optimize / sql-lint /
 db-patrol / mcp-surface / report-ui）+ 2026-10-16 ai-analyst，delta 已合并进
-openspec/specs/，`openspec validate --specs --strict` 全绿，归档件在
+openspec/specs/，`openspec validate --specs --strict` 全绿；2026-10-18 两个
+change 归档——upgrade-toolchain-latest-stable（技术栈升级 + 手搓盘点收档，
+ADR-0006 修订）与 release-v1.0-preparation（v1.0 定版 + 双语 README + 文档
+齐备 + 案例两个 + sdist 分发缺陷修复），均无 spec delta，归档件在
 openspec/changes/archive/；「影子层接入 CI」于 2026-10-14 定调关闭（决策记录见
 上文「口径」）；「AI 评测首版精度」于 2026-10-16 实测关闭——qwen-plus @ DashScope
 兼容模式，首测 0.8（1 案瞬时降级）→ 复跑 1.0，`ACCURACY_FLOOR` 校准为 0.8，
 数字留痕 evals/README.md 与 last-run.json；「UI 跟进：patrol_summary 识别 +
-ai_opinions 观点区」于 2026-10-16 交付并归档（delta 已并入 report-ui spec）；不再是未完成项。）
+ai_opinions 观点区」于 2026-10-16 交付并归档（delta 已并入 report-ui spec）；
+HANDOFF「待确认」2 条（sqlglot 程序体显式跳过声明、慢日志 UNION 分支折叠）
+于 2026-10-18 裁决关闭（均不做，理由见上文）；不再是未完成项。）

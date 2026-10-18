@@ -1,0 +1,4 @@
+schema: spec-driven
+# 纯依赖与工具链升级：运行行为零变化（报告契约/退出码/MCP 表面/CLI 输出不动），
+# 无 spec delta——schema 规则允许 skip_specs
+skip_specs: true
