@@ -1,4 +1,4 @@
-"""optimize 车道测试共用夹具：构造结构/采样快照。"""
+"""optimize 测试共用夹具：构造结构/采样快照。"""
 
 from __future__ import annotations
 

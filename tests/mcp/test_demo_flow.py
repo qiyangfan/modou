@@ -1,8 +1,4 @@
-"""agent 演示链路（v0.3 判据二）：单一 MCP 会话内 pack → verify → optimize 全链路。
-
-fixture 免生产库：影子容器即「线上」，在容器内建库 → 采集 before → 人工漏执行
-两条变更（V03/V04）→ 采集 after → 经 MCP 工具走完整链路并汇总结论。
-"""
+"""MCP 演示流程：在一个会话中运行 pack、verify 和 optimize。"""
 
 from __future__ import annotations
 
@@ -28,11 +24,7 @@ def _read_statement(path: Path) -> str:
 
 
 def _build_demo_fixture(mysql_conn: pymysql.connections.Connection, shadow, tmp_path: Path) -> dict:
-    """在影子容器构造 before/after 快照与慢 SQL 文件，返回链路输入路径。
-
-    真实迭代语义：before = 迭代前状态（空库）；「运维」执行了 V01/V02、漏了 V03/V04
-    → after 有表和列、缺索引 idx_user_amount 与存储过程 sp_order_count。
-    """
+    """在影子容器中构造 before/after 快照和慢 SQL 文件，返回流程输入路径。"""
     db = unique_db("demo")
     from modou.snapshot.capture import capture_to_file
 
@@ -58,7 +50,7 @@ def _build_demo_fixture(mysql_conn: pymysql.connections.Connection, shadow, tmp_
     # after 快照带采样数据（500 行）：verify 消费结构部分，optimize 消费采样部分
     capture_to_file(shadow.connect_params(), [db], after_path, sample_rows=500)
 
-    # verify 会把基线快照灌回影子容器重建基线：先删源库避免同名对象冲突（1050）
+    # verify 会把基线灌回影子库；先删源库，避免同名对象冲突（1050）
     with mysql_conn.cursor() as cursor:
         cursor.execute(f"DROP DATABASE `{db}`")
     mysql_conn.commit()

@@ -1,4 +1,4 @@
-"""verify 管线守卫单测：版本地板在触容器之前显式拒绝（离线，不拉容器）。"""
+"""verify 管线守卫：版本低于下限时在触容器前拒绝（离线）。"""
 
 from __future__ import annotations
 

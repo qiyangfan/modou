@@ -1,4 +1,4 @@
-"""26 条规则逐条正反例（spec：每条规则正例命中、反例不命中）。"""
+"""覆盖全部规则的正例命中和反例不命中。"""
 
 from __future__ import annotations
 
@@ -93,11 +93,7 @@ class TestRulePositiveNegative:
 
 class TestEngineBehaviors:
     def test_unparseable_statement_recorded_and_audit_continues(self, tmp_path) -> None:
-        """解析失败逐语句记录为工具命中（PARSE.001），整轮不中断。
-
-        真链真实形态：版本条件注释（H2 兼容写法）解析不出表达式，后随可解析语句
-        的规则命中必须照常产出（spec 2026-10-15 修订：非静默跳过 → 逐条记录）。
-        """
+        """版本注释语句解析失败时记录 PARSE.001，并继续审核后续语句。"""
         f = tmp_path / "cond.sql"
         f.write_text(
             "-- 对齐排序规则\n"
@@ -117,8 +113,7 @@ class TestEngineBehaviors:
 
     def test_unparseable_hit_position_and_skip(self, tmp_path) -> None:
         f = tmp_path / "bad.sql"
-        # 字符串引号不闭合 = 真不可解析（sqlglot 对乱码宽容、会把未知词解析成
-        # 标识符；残缺结构才抛 ParseError——口径与解析器能力一致）
+        # 引号不闭合才会抛 ParseError；sqlglot 会把未知词解析成标识符
         f.write_text("SELECT 1;\nSELECT 'unclosed;\n", encoding="utf-8")
         result = lint_paths([f], RULES)
         parse_hits = [h for h in result.hits if h.rule_id == "PARSE.001"]
@@ -158,7 +153,7 @@ class TestEngineBehaviors:
 
 
 class TestReviewRegressions:
-    """评审回归：sqlglot AST 形态假设逐条实测（列级约束/别名/SERIAL/FULLTEXT）。"""
+    """覆盖列级约束、别名、SERIAL 和 FULLTEXT 等 SQL 形态。"""
 
     def test_key002_column_level_primary_key_no_hit(self) -> None:
         hits = lint_sql_text("CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR(50))", "t.sql", RULES)
@@ -240,8 +235,7 @@ class TestLintPathsDedup:
 
 
 class TestNamedConstraintForms:
-    """评审回归：`CONSTRAINT <名> PRIMARY KEY/UNIQUE` 是 exp.Constraint 包裹
-    （mysqldump 高频形态），KEY.002/005/007/STA.003 不得整体漏判。"""
+    """覆盖具名主键和唯一约束，确保相关规则能检查其内部约束。"""
 
     def test_key002_named_primary_key_no_hit(self) -> None:
         hits = lint_sql_text(

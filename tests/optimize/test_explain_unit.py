@@ -55,7 +55,7 @@ class TestParseExplainJson:
         assert [t["table"] for t in plan.table_accesses] == ["a", "b"]
 
     def test_missing_cost_info_degrades_to_none(self) -> None:
-        """query_cost 未入官方手册（事实字段）：缺失时容错降级为 None，不抛异常。"""
+        """query_cost 缺失时降级为 None，不抛异常。"""
         plan = parse_explain_json(json.dumps({"query_block": {"select_id": 1, "table": {"table_name": "t"}}}))
         assert plan.query_cost is None
         assert plan.table_accesses

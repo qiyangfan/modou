@@ -1,11 +1,6 @@
-"""语句切分器：DELIMITER 感知的词法切分（回放计数与预警分析共用）。
+"""按 MySQL 词法规则切分语句，供回放和预警分析共用。
 
-切分器只做「语句边界」这一件事，不做语法结论（结论级输出不依赖解析，ADR-0004）。
-规则与 mysql 客户端一致：
-- 默认分隔符 `;`，`DELIMITER <token>` 指令改变分隔符（仅当不在字符串/注释内时识别）；
-- 单引号（含 \' 与 '' 转义）、双引号、反引号内的分隔符不切分；
-- `#` 注释、`-- `（后随空白）注释、`/* */` 块注释内的分隔符不切分；
-  `/*! ... */` 版本注释按注释跳过但保留在语句文本内（服务器可执行）。
+识别 DELIMITER、引号和注释中的分隔符；保留可执行的 ``/*! ... */`` 注释，不解析 SQL 语法。
 """
 
 from __future__ import annotations
@@ -20,11 +15,7 @@ def split_statements(sql_text: str) -> list[str]:
 
 
 def final_delimiter(sql_text: str) -> str:
-    """返回扫描结束时生效的分隔符（默认 `;`，DELIMITER 指令会切换）。
-
-    pack 用它校验「每个变更文件结束时分隔符已复位」：某文件把 DELIMITER 块留到 EOF
-    时，合并产物对 DELIMITER 感知的客户端会跨文件粘连语句，且逐文件预警序号错位。
-    """
+    """返回扫描结束时生效的分隔符，供 pack 检查文件是否以默认分隔符收尾。"""
     _, delimiter = _scan(sql_text)
     return delimiter
 
@@ -43,7 +34,7 @@ def _scan(sql_text: str) -> tuple[list[str], str]:
         return not buffer_has_code
 
     while i < n:
-        # 行首 DELIMITER 指令（仅在语句起点处识别）
+        # DELIMITER 只在语句起点识别
         if (
             buffer_is_statement_start()
             and _at_line_start(buffer)
@@ -100,7 +91,7 @@ def _scan(sql_text: str) -> tuple[list[str], str]:
         if ch == "/" and sql_text[i : i + 2] == "/*":
             j = _skip_block_comment(sql_text, i)
             buffer.append(sql_text[i:j])
-            # /*! ... */ 版本注释可执行，算作语句内容（否则纯版本注释语句会被丢弃）
+            # /*! ... */ 版本注释可执行，算语句内容
             if sql_text[i : i + 3] == "/*!":
                 buffer_has_code = True
             i = j

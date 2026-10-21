@@ -1,16 +1,14 @@
-"""影子库环境兼容性检查：版本与大版本、平台参数必须与快照一致（ADR-0005）。
+"""检查影子库版本和平台参数是否与快照兼容。
 
-不匹配明确报错（环境错误，退出码 2），绝不静默降级——影子库与目标库行为不一致时，
-回放推导的期望态不可信。
+不匹配时报错（退出码 2），不静默降级；影子库与目标库行为不一致时期望态不可信。
 """
 
 from __future__ import annotations
 
 from modou.snapshot.model import SnapshotMeta
 
-# 采集/内省依赖 8.0+ 专有元数据（STATISTICS.expression 于 8.0.13+、
-# CHECK_CONSTRAINTS 表于 8.0.16+）：更老版本在查询期报晦涩错误，
-# 入口处显式拒绝。5.7 仅 pack 锁风险注记口径（SUPPORTED_TARGET_MAJORS）。
+# 依赖 8.0.13+ 的 STATISTICS.expression 与 8.0.16+ 的 CHECK_CONSTRAINTS；更老版本入口处拒绝。
+# 5.7 只用于 pack 的锁风险注记。
 MINIMUM_SUPPORTED_MAJOR = 8
 
 
@@ -21,7 +19,7 @@ def version_series(server_version: str) -> str:
 
 
 def unsupported_version_errors(meta: SnapshotMeta) -> list[str]:
-    """返回「版本低于采集支持地板」的错误清单；空清单 = 支持。"""
+    """返回版本低于支持下限的错误；空清单表示支持。"""
     series = version_series(meta.server_version)
     try:
         major = int(series.split(".")[0])

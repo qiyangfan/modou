@@ -78,7 +78,7 @@ class TestParser:
         assert entries[0].time_hint == "1792730400"
 
     def test_malformed_metric_value_skipped(self) -> None:
-        """数值损坏的指标行（截断/写坏日志）跳过该条目并计数，不炸整个解析。"""
+        """指标值损坏时跳过该条目并计数，不中断解析。"""
         text = (
             "# Query_time: 1.2.3 Lock_time: 0.0 Rows_sent: 1 Rows_examined: 1\n"
             "SET timestamp=1;\n"
@@ -133,7 +133,7 @@ class TestAggregate:
 
 class TestSkippedLinesContract:
     def test_skipped_lines_in_json_and_render(self) -> None:
-        """跳过计数必须有报告出口（契约三方：生成端/文档/UI）。"""
+        """跳过计数必须进入报告，供生成端、文档和 UI 使用。"""
         from modou.patrol.report import slowlog_render, slowlog_to_json
 
         text = (

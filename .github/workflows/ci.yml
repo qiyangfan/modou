@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── 门禁 1：Python 内核（与 AGENTS.md 门禁命令单源） ──────────────
+  # Python 内核门禁
   core:
     runs-on: ubuntu-latest
     steps:
@@ -20,11 +20,10 @@ jobs:
           node-version: 24
       - uses: astral-sh/setup-uv@v10.3.0
         with:
-          # 3.12 = requires-python 地板，保地板可装；本地开发用 3.13 亦可
+          # 3.12 是项目支持的最低版本。
           python-version: "3.12"
           enable-cache: true
-      # ui/dist 是 hatch force-include 的硬前置（uv sync 走 editable 构建同路径），
-      # 内核门禁在安装前先产出前端构建产物（产物不入库，见 .gitignore 注释）
+      # Python 包含 UI 资源，安装前需先生成构建产物。
       - name: Build UI assets
         run: npm ci --prefix ui && npm run build --prefix ui
       - run: uv sync --frozen
@@ -34,11 +33,7 @@ jobs:
       - name: CLI 冒烟
         run: uv run modou --help
 
-  # ── 门禁 2：薄报告层（预留位） ────────────────────────────────────
-  # ui/ 落地（v0.4）前自动跳过；落地后按家族惯例换 pnpm
-  # （参考 muniu web-check：pnpm/action-setup + package_json_file 指向 ui/）。
-  # Node 版本 = 家族 web 门禁标准：24（muniu/kongming 同款）。
-  # 注意：hashFiles 只能用于 step 级 if，job 级跳过须走 needs outputs。
+  # UI 目录不存在时跳过前端门禁。
   ui-detect:
     runs-on: ubuntu-latest
     outputs:

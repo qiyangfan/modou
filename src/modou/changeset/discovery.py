@@ -1,15 +1,11 @@
-"""变更集发现：目录扫描、V 命名解析、manifest 一致性校验。
-
-规范来源：ADR-0007（Flyway 式 V<序号>__<描述>.sql 命名）与 spec「变更集打包零遗漏」。
-错误级（errors）阻塞打包；警告级（warnings）仅提示不阻塞。
-"""
+"""扫描变更集目录，校验 V 命名和 manifest，并按序整理脚本。"""
 
 import itertools
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# V<序号>__<描述>.sql：序号至少两位数字零填充（允许更多位），描述为字母/数字/连字符/下划线
+# V<序号>__<描述>.sql：序号至少两位，描述限字母、数字、连字符、下划线
 _NAME_PATTERN = re.compile(r"^V(?P<seq>\d{2,})__(?P<desc>[A-Za-z0-9_-]+)\.sql$")
 MANIFEST_NAME = "manifest.txt"
 
@@ -42,7 +38,7 @@ def _parse_manifest(directory: Path, errors: list[str]) -> set[str]:
     try:
         manifest_text = manifest_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        # 不可读（权限）或非 UTF-8 编码都按校验错误处理，收敛到确定性退出码而非裸 traceback
+        # 权限或编码错误按输入错误处理。
         errors.append(f"cannot read {manifest_path}: {exc}")
         return set()
     declared: set[str] = set()
@@ -58,11 +54,9 @@ def _parse_manifest(directory: Path, errors: list[str]) -> set[str]:
 
 
 def discover_changeset(directory: Path, *, allow_legacy_names: bool = False) -> DiscoveryResult:
-    """扫描变更集目录，产出按序号排序的脚本清单与校验结论。
+    """扫描并按序整理脚本；校验 manifest、文件名和重复序号，跳号只警告。
 
-    - manifest 声明与目录 .sql 文件必须一一对应（缺/多均错误级）；
-    - 序号重复错误级（spec 明确拒绝打包）；跳号警告级（ADR-0007）；
-    - 非 V 命名的 .sql 文件默认拒绝，allow_legacy_names=True 时按文件名缀后收录并警告。
+    allow_legacy_names 为真时，非 V 命名文件按文件名纳入并警告。
     """
     result = DiscoveryResult()
     if not directory.is_dir():

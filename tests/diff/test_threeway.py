@@ -130,11 +130,7 @@ def test_wrong_execution_column_type_differs() -> None:
 
 
 def test_column_collation_difference_rendered() -> None:
-    """collation 参与判差就必须参与渲染：两侧渲染同文时读者无法理解差异何在。
-
-    真链场景：链脚本建表不钉 collation（继承库默认），交付 dump 产物固化了
-    生成环境默认——verify 判 59 表「错执行（列、表选项）」但列渲染同文。
-    """
+    """参与比较的 collation 必须出现在渲染文本中，否则两侧文本相同，读者看不出差异。"""
     e = db(
         tables={"t1": table("t1", columns=[replace(column("plant_id", "varchar(64)"), collation="utf8mb4_unicode_ci")])}
     )
@@ -150,24 +146,20 @@ def test_column_collation_difference_rendered() -> None:
 
 
 def test_column_comment_difference_rendered() -> None:
-    """comment 同为参与比较的字段，渲染必须可区分（真链场景：执行事故把中文注释双重编码固化）。"""
+    """列注释参与比较，差异值在结论中必须可区分。"""
     e = db(tables={"t1": table("t1", columns=[replace(column("plant_id", "varchar(64)"), comment="电站标识")])})
     a = db(tables={"t1": table("t1", columns=[replace(column("plant_id", "varchar(64)"), comment="çµç«æ è¯")])})
     conclusions = three_way_diff(None, e, a)
     assert conclusions[0].kind == KIND_WRONG
     detail = conclusions[0].details[0]
-    # !r 渲染把乱码中的不可打印字节转义为 \xNN 字面量，字节形态对读者无歧义
+    # !r 会把不可打印字节转义为 \xNN，读者不会误读
     assert "comment='电站标识'" in detail.expected
     assert r"\x94" in detail.actual
     assert detail.expected != detail.actual
 
 
 def test_new_table_options_mismatch_is_wrong_execution() -> None:
-    """回归：新建表（基线无此表）且表选项与期望不符时，应归为错执行而非崩溃。
-
-    真实场景：运维以 latin1 客户端执行含中文注释的变更集，注释被双重编码固化，
-    verify 必须把它作为错执行报出来，这正是验收的本职。
-    """
+    """新建表的表选项与期望不符时归为错执行。"""
     expected_table = replace(table("orders", columns=[column("id")]), comment="订单表")
     actual_table = replace(expected_table, comment="è®¢å¡¨")  # latin1 双重编码后的固化形态
     conclusions = three_way_diff(None, db(tables={"orders": expected_table}), db(tables={"orders": actual_table}))
@@ -180,7 +172,7 @@ def test_new_table_options_mismatch_is_wrong_execution() -> None:
 
 
 def test_created_but_index_missing_is_missing_not_wrong() -> None:
-    """对象已创建、其中一条语句（建索引）漏执行 → 该维度归漏执行而非错执行。"""
+    """对象已创建但建索引语句漏执行时，该维度归漏执行。"""
     b = db(tables={"t1": table("t1", columns=[column("id"), column("a", ordinal=2)])})
     e = db(tables={"t1": table("t1", columns=[column("id"), column("a", ordinal=2)], indexes=[index("idx_a", ["a"])])})
     a = db(tables={"t1": table("t1", columns=[column("id"), column("a", ordinal=2)])})
@@ -209,13 +201,13 @@ def test_historical_drift_on_untouched_table() -> None:
         }
     )
     conclusions = three_way_diff(b, e, a)
-    # 本次变更（t_users 加列）已正确落地；t_legacy 与变更无关却变了 → 历史漂移
+    # t_users 已按期望变更；无关的 t_legacy 改动归为历史漂移。
     assert object_kind_names(conclusions) == {("appdb", "table", "t_legacy")}
     assert conclusions[0].kind == KIND_DRIFT
 
 
 def test_correctly_executed_drop_yields_no_conclusion() -> None:
-    """变更集删除对象且实际已删除 → 全部一致（回归：曾在此场景抛 ValueError）。"""
+    """变更集删除对象且实际已删除时不产出结论。"""
     dropped = table("t_old", columns=[column("id")])
     b = db(tables={"t_old": dropped})
     e = db(tables={})
@@ -239,7 +231,7 @@ def test_missed_drop_is_missing_execution() -> None:
 
 
 def test_same_object_multiple_kinds_per_dimension() -> None:
-    """同对象多维度不同类别：索引漏执行与列定义错执行各自成条。"""
+    """同一对象的不同维度可以分别归为漏执行和错执行。"""
     b = db(tables={"t1": table("t1", columns=[column("id"), column("a", ordinal=2)])})
     e = db(
         tables={
@@ -374,7 +366,7 @@ def test_database_missing_in_actual_expected_new_object_is_missing() -> None:
     assert conclusions[0].kind == KIND_MISSING
 
 
-# ── 库级 charset/collation 维度（期望≠实际才产出结论，与其余维度同口径） ─────
+# ── 库级字符集/排序规则：期望≠实际才产出结论 ──────────────────────────────
 
 
 def _db_charset(name: str, charset: str, collation: str) -> DatabaseInventory:
@@ -382,7 +374,7 @@ def _db_charset(name: str, charset: str, collation: str) -> DatabaseInventory:
 
 
 def test_db_charset_alter_landed_yields_no_conclusion() -> None:
-    """回归：ALTER DATABASE 字符集合法落地（B=旧，E=A=新）→ 无结论，不得在 classify 崩溃。"""
+    """ALTER DATABASE 字符集按期望落地时不产出结论。"""
     old = _db_charset("appdb", "utf8mb4", "utf8mb4_0900_ai_ci")
     new = _db_charset("appdb", "utf8mb3", "utf8mb3_general_ci")
     assert three_way_diff(old, new, new) == []
@@ -406,7 +398,7 @@ def test_db_collation_drift_on_untouched_dimension() -> None:
 
 
 def test_new_db_charset_mismatch_is_wrong_execution() -> None:
-    """基线缺库（新建库场景）：期望与实际的库字符集不符 → 错执行。"""
+    """基线缺库时，期望与实际库字符集不符归为错执行。"""
     e = _db_charset("newdb", "utf8mb4", "utf8mb4_0900_ai_ci")
     a = _db_charset("newdb", "latin1", "latin1_swedish_ci")
     conclusions = three_way_diff(None, e, a)

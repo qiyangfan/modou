@@ -108,7 +108,7 @@ def test_verify_bad_snapshot_file_exit_two(tmp_path: Path) -> None:
 
 
 def test_verify_changeset_validation_error_exit_two(tmp_path: Path) -> None:
-    """变更集校验失败必须真实走 VerifyInputError → 2（不得被快照加载错误抢先造成假绿）。"""
+    """变更集校验失败应走 VerifyInputError 并返回 2，不能被快照加载错误抢先。"""
     changeset = make_changeset(tmp_path / "cs", {"V01__a.sql": "SELECT 1;"})  # 无 manifest
     baseline = tmp_path / "b.json"
     baseline.write_text(_valid_snapshot_json(), encoding="utf-8")
@@ -128,7 +128,7 @@ def test_pack_invalid_target_major_exit_two(tmp_path: Path) -> None:
 
 
 def test_pack_stdout_is_pure_sql_when_redirected(tmp_path: Path) -> None:
-    """进程级守护：stdout 只允许 SQL 产物，预警一律走 stderr（重定向交付不得混入诊断文本）。"""
+    """stdout 只允许 SQL 产物，预警一律走 stderr。"""
     changeset = make_changeset(tmp_path / "cs", {"V01__drop.sql": "DROP TABLE old_t;"}, ["V01__drop.sql"])
     proc = subprocess.run(
         [sys.executable, "-m", "modou.cli", "pack", str(changeset)],
@@ -143,7 +143,7 @@ def test_pack_stdout_is_pure_sql_when_redirected(tmp_path: Path) -> None:
 
 
 def test_capture_connection_failure_exit_two(tmp_path: Path) -> None:
-    """采集失败（连接拒绝）属环境错误 → 退出码 2；1 保留给「存在差异」语义。"""
+    """采集失败（连接拒绝）属环境错误，退出码 2；1 只用于「存在差异」。"""
     output = tmp_path / "s.json"
     result = runner.invoke(
         app,
@@ -167,7 +167,7 @@ def test_capture_connection_failure_exit_two(tmp_path: Path) -> None:
 
 
 def test_capture_report_json_is_kernel_summary(tmp_path: Path, monkeypatch) -> None:
-    """证据原语单一事实源：CLI --report-json 与内核 snapshot_summary 逐字节同构。"""
+    """CLI --report-json 与内核 snapshot_summary 输出逐字节一致。"""
     import json
 
     from modou.snapshot.model import DatabaseInventory
@@ -193,7 +193,7 @@ def test_capture_report_json_is_kernel_summary(tmp_path: Path, monkeypatch) -> N
 
 
 class TestVerifyAiAttribution:
-    """verify 失败归因的 CLI 接线：配置驱动、观点进报告、退出码免疫。"""
+    """verify 失败归因接线：配置后观点进报告，退出码不变。"""
 
     def test_unconfigured_no_ai_call_no_section(self, tmp_path, monkeypatch) -> None:
         for key in ("MOUDO_AI_BASE_URL", "MOUDO_AI_API_KEY", "MOUDO_AI_MODEL"):
@@ -218,9 +218,9 @@ class TestVerifyAiAttribution:
             def render(self):
                 return "墨斗验收报告"
 
-        # 桩掉容器回放：让 AI 分支真实可达（有发现），未配置时 tripwire 必须不被触发
+        # 桩掉容器回放，让 AI 分支可达；未配置时 tripwire 不得触发
         monkeypatch.setattr("modou.cli.run_verify", lambda *args, **kwargs: FakeOutcome())
-        # tripwire 有效性：AI 归因在报告落盘之前，--report-json 一旦缺席即说明命令中途夭折
+        # AI 归因先于报告落盘；报告文件缺失即说明命令中途退出
         report = tmp_path / "verify-report.json"
         result = runner.invoke(
             app,
@@ -259,7 +259,7 @@ class TestVerifyAiAttribution:
 
         monkeypatch.setattr("modou.ai.lane_verify.attribute_findings", fake_attribute)
 
-        # 退出码 1 的真实场景由影子集成覆盖；此处用 monkeypatch run_verify 造确定性结论
+        # 退出码 1 的场景由集成测试覆盖，这里用桩造确定性结论
         class FakeOutcome:
             exit_code = 1
             report_json: ClassVar[dict] = {

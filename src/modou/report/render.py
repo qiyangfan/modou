@@ -1,6 +1,6 @@
-"""验收报告模型：人读文本 + 机读 JSON 双出口（report_version=1，契约冻结，ADR-0008）。
+"""验收报告的人读文本与机读 JSON 出口（report_version=1）。
 
-确定性退出码：0=全部一致；1=存在差异结论；2=环境或输入错误。
+退出码：0=全部一致；1=存在差异结论；2=环境或输入错误。
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ def report_to_json(report: VerifyReport) -> dict:
 
 
 def render_text(report: VerifyReport) -> str:
-    """人读文本（中文正文）：按库分组，逐对象列结论与差异维度。"""
+    """生成中文人读报告，按库分组列出结论与差异。"""
     lines: list[str] = ["墨斗验收报告", "＝" * 40]
 
     for error in report.env_errors:
@@ -115,7 +115,7 @@ def render_text(report: VerifyReport) -> str:
         for db_name, conclusions in report.databases.items():
             lines.append("")
             if len(report.databases) > 1:
-                # 多库时计数只在尾部「汇总」行出现一次，库头不带计数（避免跨库误读）
+                # 多库时只在末尾汇总计数，避免把总数误读成单库计数
                 lines.append(f"── 库 {db_name} ──")
             else:
                 counts = " · ".join(f"{label} {total_by_kind[kind]}" for kind, label in KIND_LABELS.items())

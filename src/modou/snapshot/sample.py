@@ -1,12 +1,4 @@
-"""采样数据：确定性抽样 SQL 构造与行值的 JSON 化/还原。
-
-采样口径（v0.2 design §1）：
-- 按主键索引顺序取前 N 行（索引顺序读，对线上低成本）；同库同参数重复采集
-  得到相同样本集——ORDER BY 主键列 ASC 在唯一主键下是确定性序；
-- 行值经 json_safe_value 转为 JSON 安全形态存储，灌入时按列类型还原
-  （restore_value）：二进制带 $binary 标记还原为 bytes，时间类型以 ISO 字符串
-  直接作为参数传入（MySQL 接受 'T' 分隔的 datetime 字面量）。
-"""
+"""按主键顺序确定性采样，并转换快照中保存和还原的行值。"""
 
 from __future__ import annotations
 
@@ -17,7 +9,7 @@ from modou.snapshot.model import TableDef
 
 BINARY_TAG = "$binary"
 
-# TEXT/BLOB 列建索引必须给前缀长度；64 字符是索引选择性与长度的折中口径
+# TEXT/BLOB 索引必须带前缀长度；64 是选择性与长度的折中
 TEXT_PREFIX_LENGTH = 64
 _TEXT_TYPE_PREFIXES = ("text", "blob", "tinytext", "tinyblob", "mediumtext", "mediumblob", "longtext", "longblob")
 
@@ -27,11 +19,7 @@ class NoPrimaryKeyError(Exception):
 
 
 def json_safe_value(value: object) -> object:
-    """把 pymysql 返回值转为 JSON 安全形态（快照存储侧）。
-
-    时间类型保留完整精度（微秒在 isoformat 中按需出现）——截断会让样本集
-    与源值不一致，「确定性样本集」承诺失真。
-    """
+    """将 pymysql 返回值转为 JSON 可序列化类型，保留时间精度。"""
     if value is None or isinstance(value, (int, float, str, bool)):
         return value
     if isinstance(value, Decimal):
@@ -45,7 +33,7 @@ def json_safe_value(value: object) -> object:
     if isinstance(value, datetime.time):
         return value.isoformat()
     if isinstance(value, datetime.timedelta):
-        # MySQL TIME（可为负、可带小数秒）：pymysql 以 timedelta 给出
+        # MySQL TIME 可为负、可带小数秒，pymysql 以 timedelta 返回
         total_seconds = value.days * 86400 + value.seconds
         sign = "-" if total_seconds < 0 else ""
         hours, remainder = divmod(abs(total_seconds), 3600)
@@ -58,11 +46,7 @@ def json_safe_value(value: object) -> object:
 
 
 def restore_value(json_value: object, column_type: str) -> object:
-    """把快照中的 JSON 值还原为 pymysql 可绑定的参数（影子灌入侧）。
-
-    时间列的 ISO 字符串直接作为参数传入（MySQL 接受 'T' 分隔字面量），
-    无需按类型解析回 Python 对象；仅二进制标记需要显式还原。
-    """
+    """把快照中的 JSON 值转回可绑定参数，并还原二进制标记。"""
     if isinstance(json_value, dict) and BINARY_TAG in json_value:
         return bytes.fromhex(str(json_value[BINARY_TAG]))
     return json_value
@@ -81,11 +65,7 @@ def _orderable_key_parts(parts: list) -> list[str]:
 
 
 def build_sample_sql(database: str, table: TableDef, *, limit: int) -> str:
-    """构造确定性采样 SQL：显式列名 + 主键顺序 + 行数上限（禁止 SELECT *）。
-
-    生成列（generation_expression 非空）不进采样列清单：MySQL 对显式赋值
-    生成列的 INSERT 报 3105，且其值可由基列推导，排除无损。
-    """
+    """构造按主键排序并限制行数的采样 SQL；排除不能显式插入的生成列。"""
     if not table.columns:
         raise NoPrimaryKeyError(f"table {database}.{table.name} has no column metadata")
     primary = next((idx for idx in table.indexes if idx.name == "PRIMARY"), None)

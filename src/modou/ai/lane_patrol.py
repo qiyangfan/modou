@@ -1,10 +1,6 @@
-"""patrol 跨信号综合叙事（内置通道，design §5）：漂移 + 未用索引 + 慢日志指纹 →
-AI 跨信号洞察。
+"""根据确定性巡检摘要生成跨信号 AI 观点。
 
-- 输入是 patrol/summary 的确定性 digest（结构性事实），AI 只做规则表达不了的
-  关联与取舍（如「新增索引与慢日志扫描相互印证」「漂移删除与未用索引矛盾」）；
-- 无信号零调用；输出逐条校验（仅接受 cross-signal 主题）；失败降级不阻塞报告；
-- 只产出 report.opinions.AiOpinion，退出码免疫。
+无巡检信号时不调用模型；调用失败降级为观点，不影响退出码。
 """
 
 from __future__ import annotations
@@ -39,7 +35,7 @@ def narrativize(
     transport: Transport = default_transport,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> list[AiOpinion]:
-    """对综合摘要做跨信号叙事；无信号零调用，失败降级为单条 degraded 观点。"""
+    """对巡检摘要生成跨信号观点；无信号不调用，失败降级为一条 degraded 观点。"""
     signals = summary_json.get("signals") or {}
     if not signals:
         return []
@@ -56,7 +52,7 @@ def narrativize(
         return [degraded(LANE, SUBJECT, config.model, str(exc))]
     items = extract_json_array(content)
     if items is None:
-        # 回复不可解析同属调用失败（spec「调用失败降级」）：标注原因，不静默缺席
+        # 回复不可解析时按调用失败降级。
         return [degraded(LANE, SUBJECT, config.model, "unparseable reply (no JSON array)")]
     opinions: list[AiOpinion] = []
     for item in items:

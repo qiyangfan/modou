@@ -1,13 +1,4 @@
-"""端到端验收：真实形态变更集 + 人工构造的执行结果，verify 必须给出正确结论与退出码。
-
-场景映射 spec：
-- 全部落地 → 退出码 0；
-- 漏执行一条语句 → 「漏执行」指认该语句影响的对象，退出码 1；
-- 索引列序建错 → 「错执行」展示两侧定义，退出码 1；
-- 与变更无关的并行改动 → 「历史漂移」，不与本次变更结论混淆；
-- 多库清单 → 报告按库分组，退出码取最严重档；
-- 语法错误 / 环境不匹配 / 缺 default-database → 退出码 2。
-"""
+"""验收端到端测试：覆盖正确落地、漏执行、错执行、历史漂移、多库和输入错误。"""
 
 from __future__ import annotations
 
@@ -74,7 +65,7 @@ def packed_statements(changeset_dir: Path) -> list[str]:
 
 
 def _statement_db_target(statement: str) -> str | None:
-    """从语句文本解析 USE 目标库：跳过前导注释行（pack 头注释附着在文件首语句上）。"""
+    """从语句文本解析 USE 目标库，跳过文件首语句附着的 pack 注释。"""
     for line in statement.splitlines():
         text = line.strip()
         if not text or text.startswith("--") or text.startswith("#"):
@@ -91,10 +82,9 @@ def apply_as_ops(
     statements: list[str],
     skip=None,
 ) -> None:
-    """模拟运维执行打包脚本：单连接顺序执行（USE 语句自然切库）。
+    """模拟运维顺序执行打包脚本。
 
-    db_name 为单库执行的默认库（运维先 USE 后跑脚本）；跨库变更集传 None 靠 USE 切换。
-    skip(current_db, statement) 为真时跳过该语句（构造漏执行）。
+    db_name 为默认库，跨库变更集传 None 由 USE 切换；skip 用于构造漏执行。
     """
     if db_name is not None:
         conn.select_db(db_name)
@@ -209,7 +199,7 @@ def test_verify_wrong_index_column_order_is_caught(mysql_server, mysql_conn, tmp
     assert detail.actual.index("amount") < detail.actual.index("user_id")
 
 
-# ── 场景四：无关并行改动 → 历史漂移，不与本次变更混淆 ────────────────────────
+# ── 场景四：无关并行改动归为历史漂移 ────────────────────────────────────────
 
 
 def test_verify_unrelated_drift_is_isolated(mysql_server, mysql_conn, tmp_path) -> None:
@@ -261,7 +251,7 @@ def test_verify_multi_database_grouped_and_aggregated(mysql_server, mysql_conn, 
     assert {c.object_name for c in outcome.report.databases[db1]} == {"orders"}
 
 
-# ── 场景六：变更集正确 DROP 对象 → 退出码 0（回归：diff 曾在此崩溃）───────────
+# ── 场景六：变更集正确 DROP 对象 → 退出码 0 ─────────────────────────────────
 
 
 def test_verify_correctly_executed_drop_exit_zero(mysql_server, mysql_conn, tmp_path) -> None:
@@ -316,7 +306,7 @@ def test_verify_baseline_missing_db_not_created_by_replay_exit_two(mysql_server,
     newdb = unique_db("modou_new")
     prepare_baseline_db(mysql_conn, db0)
     baseline = capture_dbs(mysql_server, [db0])
-    # 变更集不建库；人工在实际侧建了库（他人所为）→ 期望态无从推导
+    # 变更集不建库，但实际侧有人建了库；期望态无法推导
     with mysql_conn.cursor() as cursor:
         cursor.execute(f"CREATE DATABASE `{newdb}`")
     changeset_dir = tmp_path / "cs-noop"

@@ -1,13 +1,6 @@
-"""schema 切片器：按语句触达裁剪元数据上下文（spec「上下文按触达裁剪」）。
+"""按语句触达范围裁剪 schema 上下文。
 
-口径：
-- 触达面 = 语句引用的表（sqlglot AST，CTE 别名排除——它以 exp.Table 形态出现，
-  HANDOFF 已实证）+ USE 语句建立的库上下文（对后续未限定语句生效）；
-- 解析不了的语句不贡献触达面（usable=False 由调用方决定是否兜底），不猜测；
-- 输出与快照求交：切片里只有真实存在的库表（AST 里的索引名等伪表自然消解）；
-- 预算约束的是「补充上下文」，触达表必含（丢触达表等于让 AI 瞎评）——单条目
-  永不截半，超预算整条丢弃。预算按字符计（max_chars）：内核零 tokenizer 依赖，
-  字符预算是 token 预算的确定性工程近似（中文/SQL 混合文本约 1 char ≈ 0.5~1 token）。
+只纳入快照中存在的表；触达表必含，字符预算只限制补充的同库表；不可解析的语句不贡献触达面。
 """
 
 from __future__ import annotations
@@ -26,7 +19,7 @@ DEFAULT_SCHEMA_BUDGET_CHARS = 24000
 
 @dataclass
 class TouchedContext:
-    """语句集的触达面：库名（含 USE 上下文）与 (库, 表) 引用。"""
+    """语句触达的库（含 USE）与 (库, 表) 引用。"""
 
     databases: set[str] = field(default_factory=set)
     tables: set[tuple[str, str]] = field(default_factory=set)
@@ -34,7 +27,7 @@ class TouchedContext:
 
 
 def touched_objects(sql: str, *, default_database: str | None = None) -> TouchedContext:
-    """单条语句的触达面：不可解析时 usable=False 且不贡献任何触达。"""
+    """单条语句的触达面；不可解析时 usable=False。"""
     try:
         tree = sqlglot.parse_one(sql, read="mysql", error_level=sqlglot.ErrorLevel.RAISE)
     except (sqlglot.errors.ParseError, sqlglot.errors.TokenError, ValueError):
@@ -65,11 +58,7 @@ def slice_schema(
     default_database: str | None = None,
     max_chars: int = DEFAULT_SCHEMA_BUDGET_CHARS,
 ) -> list[dict]:
-    """按触达裁剪 schema 元数据：触达表在前（必含），同库其余表按预算补充。
-
-    返回条目形如 {"database", "table", "engine", "columns", "indexes"}
-    （与 optimize/advisor.build_schema_summary 同形，消费方提示词无需分叉）。
-    """
+    """按触达范围返回 schema 条目；触达表必含，其他同库表受字符预算限制。"""
     all_touched = TouchedContext()
     current_default = default_database
     for statement in statements:
@@ -80,10 +69,10 @@ def slice_schema(
         all_touched.tables |= touched.tables
         all_touched.usable = all_touched.usable and touched.usable
         if touched.databases:
-            # USE 只对后续未限定语句生效（与回放切分器语义一致）
+            # USE 只作用于后续未限定库名的语句。
             current_default = sorted(touched.databases)[0] if len(touched.databases) == 1 else current_default
 
-    # 与快照求交：只有真实存在的库表进上下文
+    # 只保留快照中真实存在的库表
     resolved: set[tuple[str, str]] = set()
     for db_name, table_name in all_touched.tables:
         inventory = snapshot.databases.get(db_name)
@@ -102,11 +91,11 @@ def slice_schema(
             if (db_name, table_name) in resolved:
                 continue
             if db_name not in touched_dbs:
-                continue  # 无关库整库裁剪
+                continue  # 跳过整个未触达的库
             entry = _table_entry(db_name, table_name, snapshot)
             used += len(json.dumps(entry, ensure_ascii=False))
             if used > max_chars:
-                break  # 预算耗尽：补充上下文整条丢弃，已排入的触达条目不动
+                break  # 预算耗尽后不再补充；已排入的触达条目保留
             ordered.append(entry)
         else:
             continue

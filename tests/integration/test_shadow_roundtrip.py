@@ -1,9 +1,4 @@
-"""快照灌入 round-trip 保真用例（HANDOFF 风险项 1 的实证）。
-
-覆盖：库级字符集/collation 继承、显式字符集表、生成列、时间戳默认值、前缀/函数索引、
-外键、检查约束、视图、存储过程、函数、触发器、事件、中文注释、AUTO_INCREMENT 计数器。
-判定标准：采集 → 灌入 → 再采集，两份结构化清单逐字段全等。
-"""
+"""快照 round-trip 测试：采集、灌入、再采集并比较结构字段。"""
 
 from __future__ import annotations
 
@@ -86,7 +81,7 @@ def test_shadow_container_reports_version(mysql_server) -> None:
 
 
 def test_capture_is_structurally_stable(mysql_conn: pymysql.connections.Connection) -> None:
-    """两次连续采集结构等价（spec：同一数据库重复采集 SHALL 得到结构等价的快照）。"""
+    """同一数据库重复采集得到结构等价的快照。"""
     db_name = unique_db()
     _create_rich_schema(mysql_conn, db_name)
     params = mysql_server_params(mysql_conn)
@@ -98,15 +93,10 @@ def test_capture_is_structurally_stable(mysql_conn: pymysql.connections.Connecti
 
 
 def test_restore_roundtrip_full_fidelity(mysql_conn: pymysql.connections.Connection) -> None:
-    """采集 → 灌入 → 再采集：结构化清单与对象 DDL 全等。
-
-    表的 SHOW CREATE 文本不参与全等判定：库级字符集继承场景下，列上 COLLATE 注记
-    在重灌后会从「继承态」变为「显式态」（文本漂移一轮后收敛，结构不变）——
-    这正是「比较用结构化字段、DDL 只作灌入载体」的实证依据。
-    """
+    """确认再采集的结构字段和对象 DDL 一致；表的 SHOW CREATE 文本不参与比较。"""
     db_name = unique_db()
     _create_rich_schema(mysql_conn, db_name)
-    # 先制造 AUTO_INCREMENT 计数器漂移再首采：计数器是运行时状态，不得破坏结构等价
+    # 先制造 AUTO_INCREMENT 漂移再采集：计数器是运行时状态，不应影响结构等价
     with mysql_conn.cursor() as cursor:
         cursor.execute(f"INSERT INTO {db_name}.t_inherit (name) VALUES ('a'), ('b')")
     params = mysql_server_params(mysql_conn)
@@ -119,7 +109,7 @@ def test_restore_roundtrip_full_fidelity(mysql_conn: pymysql.connections.Connect
     original_db, restored_db = original.databases[db_name], restored.databases[db_name]
     assert _structured_view(restored_db) == _structured_view(original_db)
     assert restored.meta.server_version == original.meta.server_version
-    # 内容级护栏：对象 DDL 必须是 CREATE 语句（防取错 SHOW CREATE 结果列的回归）
+    # 对象 DDL 应为对应类型的 CREATE 语句。
     for name, trigger in original_db.triggers.items():
         assert trigger.ddl.startswith("CREATE TRIGGER"), f"trigger {name} ddl corrupted: {trigger.ddl[:60]}"
     for name, procedure in original_db.procedures.items():
@@ -130,7 +120,7 @@ def test_restore_roundtrip_full_fidelity(mysql_conn: pymysql.connections.Connect
 
 
 def test_restore_roundtrip_ddl_restable_after_one_pass(mysql_conn: pymysql.connections.Connection) -> None:
-    """SHOW CREATE 文本漂移一轮后收敛：第二次 round-trip 连表 DDL 也全等。"""
+    """SHOW CREATE 文本漂移一轮后收敛，第二次 round-trip 表 DDL 也全等。"""
     db_name = unique_db()
     _create_rich_schema(mysql_conn, db_name)
     params = mysql_server_params(mysql_conn)
@@ -174,10 +164,7 @@ def test_restore_database_charset_inheritance(mysql_conn: pymysql.connections.Co
 
 
 def test_restore_resolves_cross_database_view_dependency(mysql_conn: pymysql.connections.Connection) -> None:
-    """跨库依赖（db1 视图引用 db2 视图）必须在跨库收敛池内可解。
-
-    回归：按库分池时 db1 的池永远等不到后灌的 db2.v_base，会误报不收敛 RuntimeError。
-    """
+    """db1 视图引用 db2 视图时，灌入须在跨库依赖池中完成。"""
     db1, db2 = unique_db("modou_x1"), unique_db("modou_x2")
     with mysql_conn.cursor() as cursor:
         cursor.execute(f"CREATE DATABASE {db2}")
@@ -200,11 +187,7 @@ def test_restore_resolves_cross_database_view_dependency(mysql_conn: pymysql.con
 
 
 def test_capture_fk_ignores_same_name_unique_index_on_other_table(mysql_conn: pymysql.connections.Connection) -> None:
-    """回归：他表同名的 UNIQUE KEY 不得混入本表 FK（KEY_COLUMN_USAGE 必须按表关联）。
-
-    索引名只要求表内唯一、FK 名才库内唯一，二者撞名合法；缺 table_name 关联时
-    他表行会把列拼进本表 FK 且 referenced 列存成 "None"，快照即损坏。
-    """
+    """同名索引不应跨表混入 FK；KEY_COLUMN_USAGE 必须同时按库名和表名关联。"""
     db_name = unique_db()
     with mysql_conn.cursor() as cursor:
         cursor.execute(f"CREATE DATABASE {db_name}")
@@ -241,7 +224,7 @@ def _create_rich_schema(conn: pymysql.connections.Connection, db_name: str) -> N
     with conn.cursor() as cursor:
         cursor.execute(f"CREATE DATABASE {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci")
         conn.select_db(db_name)
-        # 多语句脚本逐条执行（分号边界由测试文本控制，不涉及 DELIMITER）
+        # 多语句逐条执行；分号边界由测试文本控制，不涉及 DELIMITER
         for statement in RICH_SCHEMA.split(";"):
             if statement.strip():
                 cursor.execute(statement)
@@ -250,7 +233,7 @@ def _create_rich_schema(conn: pymysql.connections.Connection, db_name: str) -> N
 
 
 def _split_delimiter_block(sql: str) -> list[str]:
-    """测试专用切分：按 $$ 切出过程体（与回放切分器语义一致的简化版）。"""
+    """测试用切分器：按 $$ 切出过程体，简化语义与回放切分器一致。"""
     body = sql.split("DELIMITER $$", 1)[1].split("DELIMITER ;", 1)[0]
     return [part.strip().rstrip("$").strip() for part in body.split("$$") if part.strip().rstrip("$").strip()]
 

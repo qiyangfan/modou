@@ -1,8 +1,4 @@
-"""报告加载与回环 HTTP 服务：薄报告层的 Python 侧（渲染在前端产物内完成）。
-
-职责严格限于：读报告文件（kind+version 门禁）、伺服包内静态产物、把已加载的
-报告经本机端点交给前端。不解析、不重算、不存储。
-"""
+"""校验并加载报告，通过本机 HTTP 端点提供报告数据和前端静态资源。"""
 
 from __future__ import annotations
 
@@ -14,7 +10,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-# 支持的报告类型与版本（未知组合明确报错，向前演进靠版本门禁不靠猜）
+# 支持的报告类型与格式版本。
 SUPPORTED_REPORTS: dict[str, int] = {
     "verify": 1,
     "optimize": 1,
@@ -25,8 +21,7 @@ SUPPORTED_REPORTS: dict[str, int] = {
     "patrol_summary": 1,
 }
 
-# 回环绑定白名单：仅 IPv4 回环（::1 需要 IPv6 栈与 getfqdn 配合，且浏览器侧地址
-# 固定 127.0.0.1，双层不一致说明从未真正支持）
+# 只允许绑定回环地址。
 _LOOPBACK_BINDS = {"127.0.0.1", "localhost"}
 
 
@@ -39,7 +34,7 @@ class ReportLoadError(Exception):
 
 
 class UiBindError(Exception):
-    """绑定非回环地址（报告内容含 schema 元数据，回环是数据不出本地的最后一道闸）。"""
+    """非回环绑定被拒绝；报告含 schema 元数据，只能在本机访问。"""
 
 
 @dataclass
@@ -52,7 +47,7 @@ class LoadedReport:
 
 
 def load_report(path: Path) -> LoadedReport:
-    """加载单份报告：类型识别（显式 report_kind，verify 走 v1 形状识别）+ 版本门禁。"""
+    """加载并校验报告；verify v1 无 report_kind，按 summary 形状识别。"""
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -61,14 +56,14 @@ def load_report(path: Path) -> LoadedReport:
         raise ReportLoadError(f"report {path} is not a JSON object")
     kind = raw.get("report_kind")
     if kind is None:
-        # verify 报告（v0.1 冻结契约）无 report_kind 字段：按 summary 形状识别
+        # verify v1 没有 report_kind，按 summary 形状识别。
         summary = raw.get("summary")
         if isinstance(summary, dict) and "missing_execution" in summary and raw.get("report_version") == 1:
             kind = "verify"
     if not isinstance(kind, str) or kind not in SUPPORTED_REPORTS:
         raise ReportLoadError(f"unknown report kind {kind!r} in {path}")
     version = raw.get("report_version")
-    # bool 是 int 子类、1.0 == 1：版本必须是真整数，两者都不得冒充 v1 门禁通过
+    # bool 是 int 子类，1.0 == 1；版本必须是真整数
     if isinstance(version, bool) or not isinstance(version, int) or version != SUPPORTED_REPORTS[kind]:
         raise ReportLoadError(
             f"unsupported {kind} report version {version!r} in {path} (expected v{SUPPORTED_REPORTS[kind]})"
@@ -110,7 +105,7 @@ def run_ui(
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if not self._host_is_loopback():
-                # DNS rebinding：恶意页面可借域名回连 127.0.0.1 读取报告（schema 元数据）
+                # 阻止 DNS rebinding 读取本机报告。
                 self.send_error(403)
                 return
             if self.path == "/api/reports":
@@ -124,7 +119,7 @@ def run_ui(
                 )
                 return
             if self.path.startswith("/api/reports/"):
-                # 浏览器对非 ASCII/空格 id 必然百分号编码，先解码再比对
+                # 先解码报告 ID 再匹配。
                 report_id = urllib.parse.unquote(self.path.removeprefix("/api/reports/"))
                 for report in reports:
                     if report.id == report_id:
@@ -150,7 +145,7 @@ def run_ui(
         def _serve_static(self, path: str) -> None:
             relative = "index.html" if path in ("/", "") else path.removeprefix("/")
             target = (assets_dir / relative).resolve()
-            # 目录穿越防护：仅伺服包内产物目录（relative_to 含路径边界，前缀兄弟目录放不进来）
+            # 只允许读取静态资源目录内的文件。
             try:
                 target.relative_to(assets_dir)
             except ValueError:
@@ -181,13 +176,12 @@ def run_ui(
             self.wfile.write(body)
 
         def log_message(self, format: str, *args: object) -> None:
-            pass  # 静默访问日志（本地工具，不产生噪音）
+            pass  # 不输出访问日志。
 
     server = ThreadingHTTPServer((bind, port), Handler)
-    server.daemon_threads = True  # 请求线程不阻塞进程退出（Ctrl-C 干净退出，退出码 0）
-    # 服务线程在 run_ui 内启动：调用方（CLI）只负责等待中断与收尾；测试可直接请求端点
+    server.daemon_threads = True  # 请求线程不阻塞进程退出。
     threading.Thread(target=server.serve_forever, daemon=True, name="modou-ui-http").start()
     if open_browser:
-        # lazygit 模式：起服务即开浏览器；失败不影响服务本身（服务地址由 CLI 打印到 stderr）
+        # CLI 也会输出服务地址。
         webbrowser.open(f"http://127.0.0.1:{server.server_address[1]}")
     return server, reports

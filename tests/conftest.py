@@ -1,9 +1,4 @@
-"""影子库集成测试夹具：容器拉起/灌入/销毁（宪法：禁止依赖本机手工起库）。
-
-开关与镜像：
-- MOUDO_TEST_SHADOW=1 才运行（CI core 门禁保持秒级；本地全量验证显式开启）；
-- MOUDO_TEST_MYSQL_IMAGE 覆盖镜像，默认 mysql:8.4（与 ADR-0005 版本矩阵一致）。
-"""
+"""影子库集成测试夹具。设置 ``MOUDO_TEST_SHADOW=1`` 启用，可用 ``MOUDO_TEST_MYSQL_IMAGE`` 指定镜像。"""
 
 from __future__ import annotations
 
@@ -18,9 +13,9 @@ from modou.replay.container import ShadowMySQL, detect_container_cli
 
 @pytest.fixture(autouse=True)
 def _isolate_byok_env(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
-    """BYOK 三元组默认从测试环境剥离：防配置了端点的开发机上普通用例发起真实网络。
+    """默认剥离 BYOK 环境，防止普通用例发起真实网络请求。
 
-    needs_byok_env 标记的用例（评测门禁）保留真实环境——门禁本身按三元组齐备才跑。
+    needs_byok_env 标记的评测用例保留真实环境。
     """
     if request.node.get_closest_marker("needs_byok_env"):
         return
@@ -39,7 +34,7 @@ def mysql_server() -> ShadowMySQL:
         pytest.skip(f"shadow integration gated: set {GATE_ENV}=1 to run container tests")
     cli = detect_container_cli()
     if cli is None:
-        # 无容器 CLI 同属「拉起失败」：strict 语义要求 fail 而非 skip，不得假性通过
+        # 无容器 CLI 也属拉起失败；strict 模式要求 fail 而非 skip
         if os.environ.get("MOUDO_TEST_SHADOW_STRICT") == "1":
             pytest.fail("no container runtime (podman/docker) available (strict mode)")
         pytest.skip("no container runtime (podman/docker) available")

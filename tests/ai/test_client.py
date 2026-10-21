@@ -1,4 +1,4 @@
-"""BYOK 客户端 fail-safe 边界测试：传输层任何异常都归入 AiCallError（车道据此降级）。"""
+"""BYOK 客户端异常边界测试：传输层任何异常都转成 AiCallError。"""
 
 from __future__ import annotations
 
@@ -21,8 +21,7 @@ def _transport_raise(error: Exception):
 
 
 def test_http_exception_family_is_call_failure() -> None:
-    """http.client.HTTPException 族（BadStatusLine/IncompleteRead）直接继承 Exception
-    而非 OSError：代理/网关半途断连必须归入 AiCallError，不得穿透炸掉车道。"""
+    """代理或网关断连异常也应转换为 AiCallError。"""
     with pytest.raises(AiCallError):
         complete(_config(), {}, transport=_transport_raise(http.client.BadStatusLine("''")))
     with pytest.raises(AiCallError):
@@ -30,7 +29,7 @@ def test_http_exception_family_is_call_failure() -> None:
 
 
 def test_empty_content_is_call_failure() -> None:
-    """端点 200 但 content 为 null：归因为调用失败，而非把字符串 "None" 送进解析层。"""
+    """content 为 null 时按调用失败处理，不把字符串 "None" 交给解析层。"""
 
     def transport(url: str, api_key: str, payload: dict, timeout: float) -> dict:
         return {"choices": [{"message": {"content": None}}]}
@@ -40,7 +39,7 @@ def test_empty_content_is_call_failure() -> None:
 
 
 def test_transient_failure_is_retried() -> None:
-    """一过性通道故障（连接重置/半途截断）重试一次即吸收，不落到车道降级。"""
+    """一次通道故障（连接重置/半途截断）重试后成功。"""
     calls = []
 
     def flaky_transport(url: str, api_key: str, payload: dict, timeout: float) -> dict:
@@ -54,7 +53,7 @@ def test_transient_failure_is_retried() -> None:
 
 
 def test_persistent_failure_raises_after_all_attempts() -> None:
-    """持续性失败在耗尽尝试次数后原样抛 AiCallError，不无限重试。"""
+    """持续失败时耗尽尝试次数后抛 AiCallError。"""
     calls = []
 
     def dead_transport(url: str, api_key: str, payload: dict, timeout: float) -> dict:
@@ -67,7 +66,7 @@ def test_persistent_failure_raises_after_all_attempts() -> None:
 
 
 def test_ai_call_error_identity_preserved_after_retries() -> None:
-    """重试后抛出的仍是客户端内部产生的那个 AiCallError 实例（不二次包装）。"""
+    """重试后抛出的仍是同一个 AiCallError 实例，不二次包装。"""
     error = AiCallError("invalid AI endpoint response: boom")
 
     def transport(url: str, api_key: str, payload: dict, timeout: float) -> dict:

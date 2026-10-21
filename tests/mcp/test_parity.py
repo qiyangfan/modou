@@ -1,4 +1,4 @@
-"""parity 守护：MCP 工具与 CLI 分析类子命令 1:1（缺一或多一即失败，ADR-0002）。"""
+"""检查 MCP 工具与 CLI 分析类子命令一一对应。"""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ class TestParity:
         )
 
     def test_excluded_commands_present_in_cli(self) -> None:
-        """排除清单只许收录真实存在的非分析类命令（防名单腐化）。"""
+        """排除清单只能包含真实存在的非分析命令，避免失效名单。"""
         missing = EXCLUDED_COMMANDS - registered_cli_names()
         assert not missing, f"excluded commands no longer exist in CLI: {missing}"
 
@@ -72,7 +72,7 @@ class TestParity:
 
 class TestDescriptionGuard:
     def test_tool_descriptions_non_empty(self) -> None:
-        """描述是 agent 工具发现的唯一依据：空串会让同源守卫空转（评审回归）。"""
+        """每个 MCP 工具都必须提供非空描述。"""
         descriptions = _tool_descriptions()
         assert descriptions, "no tools registered"
         empty = [name for name, text in descriptions.items() if not text.strip()]
@@ -80,11 +80,7 @@ class TestDescriptionGuard:
 
 
 class TestEvidenceParity:
-    """委托面证据原语（ADR-0009 design §3）：原语清单冻结，映射目标必须已注册。
-
-    三方 diff 与 EXPLAIN 由 verify/optimize 的机读出口承载（同一报告字段），
-    不另设工具——这是 1:1 契约的延伸而非破坏（proposal「受影响决策」）。
-    """
+    """检查证据原语映射；三方 diff 和 EXPLAIN 由 verify/optimize 报告承载。"""
 
     def test_primitive_set_frozen(self) -> None:
         assert set(EVIDENCE_PRIMITIVES) == {

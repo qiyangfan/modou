@@ -1,11 +1,4 @@
-"""AI 观点区契约测试（v0.5，spec ai-analyst「结论两级分级」）。
-
-契约三律（测试即规格）：
-- 单列：AI 观点只出现在 ai_opinions 键与专属文本区，不混入确定性结论字段；
-- 来源标注：每条观点带 source=ai、模型名与「未实证」标注；
-- 退出码免疫：观点的出入不改变报告 exit_code；未配置（无观点）时报告与
-  v0.4 完全一致——无该键、文本无该区。
-"""
+"""AI 观点区测试：观点与确定性结论分离，不影响退出码。"""
 
 from __future__ import annotations
 
@@ -36,7 +29,7 @@ def _opinion() -> AiOpinion:
 
 class TestUnconfiguredZeroDiff:
     def test_empty_opinions_leave_report_identical(self) -> None:
-        """未配置 BYOK = 车道不产出观点 = attach 是恒等函数（无键、内容逐字段相等）。"""
+        """无观点时 attach 不改动报告。"""
         report = _report()
         merged = attach_ai_opinions(report, [])
         assert merged == report
@@ -89,7 +82,7 @@ class TestOpinionContract:
 
 class TestAdditiveOnly:
     def test_verify_report_gains_only_the_new_key(self) -> None:
-        """只增不改：原契约字段逐项保留，新增仅 ai_opinions 一键。"""
+        """原报告字段保持不变，只新增 ai_opinions。"""
         report = _report(exit_code=1)
         merged = attach_ai_opinions(report, [_opinion()])
         assert set(merged) == set(report) | {AI_OPINIONS_KEY}

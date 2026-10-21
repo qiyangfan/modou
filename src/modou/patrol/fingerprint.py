@@ -1,11 +1,6 @@
-"""查询指纹归一：对齐 pt-query-digest 的行业事实口径（2026-10 调研核实）。
+"""把 SQL 归一为可聚合的查询指纹。
 
-规则：全小写、空白折叠、去注释、字面量（字符串/数字/十六进制/NULL）→ `?`、
-标识符内嵌数字替换、IN()/VALUES() 列表无论基数折叠为单个占位符、多值 INSERT
-折叠为单 VALUES。基于 sqlglot tokenizer（唯一解析器，ADR-0006），不引入第二套实现。
-
-与服务器端 digest 表口径不互认（不折叠 IN、1024 字节截断、容量上限），设计已
-声明本模块为唯一指纹源（change Non-goals）。
+替换字面量与标识符中的数字，并折叠 IN/VALUES 值列表。
 """
 
 from __future__ import annotations
@@ -19,12 +14,12 @@ _EMBEDDED_DIGITS = re.compile(r"\d+")
 
 
 def fingerprint(sql: str) -> str:
-    """归一化语句文本（语句级，多语句请先切分）。解析失败按词法降级处理。"""
+    """归一单条语句文本；词法失败时退化为纯文本归一。"""
     try:
         tokens = sqlglot.tokenize(sql, read="mysql")
     except sqlglot.errors.TokenError:
         tokens = []
-        # 词法都过不了：退化为纯文本归一（仍可聚合，但保真度低）
+        # 词法失败时退化为纯文本归一，仍可聚合但保真度低
         return _fallback(sql)
 
     out: list[str] = []
@@ -35,8 +30,7 @@ def fingerprint(sql: str) -> str:
         if token.token_type in (TokenType.COMMENT,):
             i += 1
             continue
-        # IN(...) / VALUES(...) 折叠：无论基数，整组换成一个占位符——仅值列表折叠，
-        # IN (SELECT ...) 子查询不是列表，不同形态不得合并为同一指纹
+        # IN/VALUES 的值列表整体折叠为一个占位符；IN (SELECT ...) 不是值列表，不能合并
         if token.token_type in (TokenType.IN, TokenType.VALUES):
             group_start = _next_significant(tokens, i + 1)
             if group_start is not None and tokens[group_start].token_type == TokenType.L_PAREN:
@@ -44,7 +38,7 @@ def fingerprint(sql: str) -> str:
                 if head is not None and _is_value_list_head(tokens[head]):
                     out.append("?")
                     i = _skip_paren_group(tokens, group_start)
-                    # 多值 INSERT：VALUES (...), (...), ... 的后续分组一并折叠
+                    # 多值 INSERT 的后续 VALUES 分组一并折叠
                     while True:
                         comma_at = _next_significant(tokens, i)
                         if comma_at is None or tokens[comma_at].token_type != TokenType.COMMA:
@@ -65,7 +59,7 @@ def fingerprint(sql: str) -> str:
         ):
             out.append("?")
         elif token_type in (TokenType.IDENTIFIER, TokenType.VAR):
-            # 标识符保留（pt 口径只归一字面量）；小写 + 内嵌数字替换（users_2009 ≡ users_2010）
+            # 标识符保留并小写；内嵌数字替换，使 users_2009 与 users_2010 归为一类
             bare = text.strip('`"').lower()
             out.append(_EMBEDDED_DIGITS.sub("?", bare))
         else:
@@ -85,20 +79,17 @@ _VALUE_TOKENS = (TokenType.STRING, TokenType.NUMBER, TokenType.HEX_STRING, Token
 
 
 def _is_value_list_head(token: object) -> bool:
-    """括号组内首个有效 token 是否值形态：字面量 / 带符号数字 / 行构造器分组。
-
-    子查询（SELECT 开头）不是值列表，不折叠——不同查询形态必须保持不同指纹。
-    """
+    """判断括号组首个 token 是否为值形态；子查询不折叠，保持不同指纹。"""
     token_type = token.token_type  # type: ignore[attr-defined]
     if token_type in _VALUE_TOKENS:
         return True
     if token_type in (TokenType.PLUS, TokenType.DASH):
-        return True  # 带符号数字（IN (-1)）；非法 SQL 由此折叠亦无害
+        return True  # 带符号数字（如 IN (-1)）；非法 SQL 折叠也无害
     return token_type == TokenType.L_PAREN  # 行构造器 VALUES ((1,2),(3,4))
 
 
 def _skip_paren_group(tokens: list, open_index: int) -> int:
-    """跳过从 open_index（L_PAREN）开始的配对括号组，返回组后第一个下标。"""
+    """返回从 open_index 开始的配对括号组之后的下标。"""
     depth = 0
     for index in range(open_index, len(tokens)):
         token_type = tokens[index].token_type

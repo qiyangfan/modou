@@ -1,4 +1,4 @@
-"""verify 失败归因（内置通道）测试：事实打包、结构化校验、fail-safe 降级、零差异零调用。"""
+"""verify 失败归因测试：事实打包、输出校验、调用失败降级、零差异不调用。"""
 
 from __future__ import annotations
 
@@ -136,7 +136,7 @@ class TestAttributeFindings:
         assert opinions[0].subject == "report"
 
     def test_fact_packaging_failure_degrades_not_crashes(self, tmp_path, monkeypatch) -> None:
-        """事实打包段（含 schema 切片）任何异常都降级为 report 级观点，不得穿透炸掉命令。"""
+        """事实打包（含 schema 切片）失败时降级为 report 级观点，不使命令崩溃。"""
 
         def explode(*args, **kwargs):
             raise RuntimeError("schema slice blew up")
@@ -153,7 +153,7 @@ class TestAttributeFindings:
         assert opinions[0].subject == "report"
 
     def test_payload_contains_statements_and_metadata_only(self, tmp_path) -> None:
-        """数据红线：载荷仅变更集 SQL、结论事实与 schema 元数据，绝无采样数据行。"""
+        """请求载荷只含变更集 SQL、结论事实与 schema 元数据，不含采样数据行。"""
         captured: dict = {}
 
         def spy_transport(url: str, api_key: str, payload: dict, timeout: float) -> dict:

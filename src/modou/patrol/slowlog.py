@@ -1,12 +1,4 @@
-"""慢日志解析与指纹聚合（零连接，纯本地文件）。
-
-格式事实（2026-10 调研核实，MySQL 8.x）：
-- 条目 = `#` 头部元数据行（# Time / # User@Host 属事实格式，未入官方字段清单）
-  + `# Query_time: ...` 指标行 + `SET timestamp=...;` 会话行 + 语句本体；
-- `log_slow_extra`（8.0.14+，仅 FILE 输出）追加字段：官方口径「按字段数自适应」，
-  本解析器只提取 Query_time/Lock_time/Rows_sent/Rows_examined，其余忽略；
-- `USE db;` 行终止当前条目（mysql 客户端行为）；日志顺序可能与执行顺序不同。
-"""
+"""从本地 MySQL 慢日志解析条目，并按查询指纹聚合耗时和扫描行数。"""
 
 from __future__ import annotations
 
@@ -33,7 +25,7 @@ class SlowEntry:
     rows_sent: int
     rows_examined: int
     statement: str
-    time_hint: str | None = None  # # Time 或 SET timestamp（信息用途）
+    time_hint: str | None = None  # 时间来源：日志头或 SET timestamp，仅供参考
 
     @property
     def fingerprint(self) -> str:
@@ -59,11 +51,7 @@ class SlowlogReport:
 
 
 def parse_slowlog(text: str) -> tuple[list[SlowEntry], int]:
-    """解析慢日志文本为（条目清单, 跳过条目数）。
-
-    指标行数值损坏（截断/写坏的日志行）时跳过该条目并计数，不让单个坏行使
-    整个解析以输入错误告终。
-    """
+    """返回条目清单和跳过条目数；指标值损坏时跳过该条，不中断解析。"""
     entries: list[SlowEntry] = []
     skipped = 0
     metrics: tuple[float, float, int, int] | None = None
@@ -92,12 +80,11 @@ def parse_slowlog(text: str) -> tuple[list[SlowEntry], int]:
     for raw_line in text.splitlines():
         line = raw_line.rstrip("\r")
         if line.startswith("#"):
-            # 指标行（Query_time 在场即视为条目起点；其余字段逐个提取、缺省自适应
-            # ——log_slow_extra 追加字段与老版本缺字段都不影响）
+            # Query_time 出现即条目起点；其余字段按需提取，兼容 log_slow_extra 与老版本
             query_time = _METRIC_QUERY_TIME.search(line)
             if query_time:
                 flush()
-                # 时间提示属于「当前条目」：起条目时快照并复位，防止串入下一条
+                # 时间提示属于当前条目，起新条目时快照并复位
                 pending_time_hint = time_hint
                 time_hint = None
                 lock = _METRIC_LOCK_TIME.search(line)
@@ -111,7 +98,7 @@ def parse_slowlog(text: str) -> tuple[list[SlowEntry], int]:
                         int(examined.group(1)) if examined else 0,
                     )
                 except ValueError:
-                    # 数值损坏的指标行：跳过该条目并计数（正则允许 "1.2.3" 这类坏值）
+                    # 数值损坏时跳过该条目；正则可能放过 1.2.3 这类坏值
                     metrics = None
                     statement_lines = []
                     skipped += 1
@@ -119,22 +106,22 @@ def parse_slowlog(text: str) -> tuple[list[SlowEntry], int]:
                 time_match = _HEADER_TIME.match(line)
                 if time_match:
                     time_hint = time_match.group(1)
-                # 其余扩展头（# User@Host、log_slow_extra 字段行等）自适应忽略
+                # 其余扩展头忽略
             continue
         set_match = _SET_TIMESTAMP.match(line)
         if set_match:
-            # SET timestamp 属于当前条目：# Time 缺省时兜底（老版本/共享行形态）
+            # SET timestamp 仅在缺少日志头时间时作兜底
             if pending_time_hint is None:
                 pending_time_hint = set_match.group(1)
             continue
         if _USE_LINE.match(line):
-            # USE 语句终止当前条目（不构成可优化语句本体）
+            # USE 终止当前条目，不进入语句本体
             flush()
             continue
         if line.strip() == "" and metrics is None:
             continue
         if line.strip() == "":
-            # 语句内空行保留（多行语句的结构）
+            # 保留语句内空行
             statement_lines.append("")
             continue
         statement_lines.append(line)

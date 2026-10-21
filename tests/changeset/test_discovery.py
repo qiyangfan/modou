@@ -1,7 +1,4 @@
-"""变更集发现器：manifest 一致性与 V 命名规范的失败/成功用例。
-
-对应 spec「变更集打包零遗漏」与 ADR-0007（Flyway 式命名）。
-"""
+"""变更集发现器测试：manifest 校验与 V 文件命名。"""
 
 from pathlib import Path
 
@@ -9,7 +6,7 @@ from modou.changeset.discovery import discover_changeset
 
 
 def make_changeset(tmp_path: Path, files: dict[str, str], manifest: str | None) -> Path:
-    """构造变更集目录：files 为文件名→内容，manifest 为 manifest.txt 内容（None 表示不写）。"""
+    """构造变更集目录；manifest 为 None 时不写 manifest.txt。"""
     for name, content in files.items():
         (tmp_path / name).write_text(content, encoding="utf-8")
     if manifest is not None:
@@ -78,7 +75,7 @@ def test_seq_gap_warns_but_not_blocks(tmp_path: Path) -> None:
 
 
 def test_manifest_ignores_comments_and_blank_lines(tmp_path: Path) -> None:
-    make_changeset(tmp_path, {"V01__a.sql": "SELECT 1;"}, "# 迭代 32\n\nV01__a.sql\n")
+    make_changeset(tmp_path, {"V01__a.sql": "SELECT 1;"}, "# 示例说明\n\nV01__a.sql\n")
     result = discover_changeset(tmp_path)
     assert result.errors == []
     assert len(result.items) == 1

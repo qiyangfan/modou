@@ -1,8 +1,4 @@
-"""CLI 入口：子命令按车道落位（snapshot/pack/verify 已上线，optimize/lint/patrol 后续）。
-
-表面层只做参数解析与展示；全部业务逻辑在内核库（ADR-0002）。
-CLI 参数/错误文本用英文；报告正文（人读）由 report 模块渲染为中文。
-"""
+"""CLI 入口：解析参数并展示内核结果，不承载业务逻辑。"""
 
 from __future__ import annotations
 
@@ -36,7 +32,7 @@ app = typer.Typer(
 )
 
 
-# 单命令的 Typer app 会被当作单命令应用（子命令名变成参数），callback 强制子命令模式
+# 空 callback 强制子命令模式；否则单命令 Typer 会把子命令名当作参数
 @app.callback()
 def main() -> None:
     """墨斗：数据库工程化的本地层——变更验收、SQL 优化、规则审核、漂移洞察。"""
@@ -48,7 +44,7 @@ def version() -> None:
     typer.echo(f"modou {__version__}")
 
 
-# ── 快照车道 ─────────────────────────────────────────────────────────────
+# ── 快照 ─────────────────────────────────────────────────────────────────
 
 snapshot_app = typer.Typer(help="快照采集：只读导出线上结构（执行前后各一次）。")
 app.add_typer(snapshot_app, name="snapshot")
@@ -78,8 +74,7 @@ def snapshot_capture(
     try:
         snapshot = capture_to_file(params, list(dict.fromkeys(database)), output, sample_rows=sample_rows)
     except (pymysql.err.MySQLError, ValueError, OSError) as exc:
-        # 采集失败均属环境/输入错误（连接、权限、库不存在、版本地板、输出不可写），
-        # 契约映射退出码 2；1 保留给「存在差异」语义，采集不产出差异结论
+        # 采集失败属环境/输入错误，退出码 2；1 只用于「存在差异」
         typer.secho(f"snapshot capture failed: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
     if report_json is not None:
@@ -107,7 +102,7 @@ def snapshot_capture(
         )
 
 
-# ── 变更车道：pack ───────────────────────────────────────────────────────
+# ── 变更：pack ───────────────────────────────────────────────────────────
 
 
 @app.command()
@@ -135,7 +130,7 @@ def pack(
             typer.secho(f"  - {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
     except ValueError as exc:
-        # 参数取值错误（如 --target-major 不在支持清单）收敛为退出码 2，不裸穿 traceback
+        # 参数取值错误收敛为退出码 2，不抛出 traceback
         typer.secho(f"pack failed: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
 
@@ -148,11 +143,10 @@ def pack(
             typer.secho(f"cannot write packed file: {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=2) from exc
         discovery = result.discovery
-        if discovery is not None:  # 不用 assert：python -O 会剥离断言（仓库约定）
+        if discovery is not None:  # 不用 assert：python -O 会剥离断言
             typer.echo(f"packed {len(discovery.items)} file(s) -> {output}", err=True)
 
-    # 预警是诊断信息，一律走 stderr：产物走 stdout 重定向（缺省 --output 即 stdout）时
-    # 交付给运维的合并脚本不得混入非 SQL 文本
+    # 预警走 stderr，避免缺省输出到 stdout 的合并 SQL 混入非 SQL 文本
     for warning in result.warnings:
         typer.secho(
             f"[{warning.kind}] {warning.source_file} #{warning.statement_index}: {warning.message}",
@@ -185,7 +179,7 @@ def pack(
         typer.echo(f"warnings report -> {report_json}", err=True)
 
 
-# ── 变更车道：verify ─────────────────────────────────────────────────────
+# ── 变更：verify ─────────────────────────────────────────────────────────
 
 
 @app.command()
@@ -213,8 +207,8 @@ def verify(
 ) -> None:
     """Replay the changeset on a local shadow MySQL and three-way diff baseline/expected/actual.
 
-    Optional AI failure attribution: set MOUDO_AI_BASE_URL / MOUDO_AI_API_KEY / MOUDO_AI_MODEL (BYOK).
-    Without configuration no network request is made; opinions never affect the exit code.
+    Optional AI failure attribution via MOUDO_AI_* env (BYOK); without it no network call is made,
+    and opinions never affect the exit code.
     """
     try:
         baseline_snapshot = snapshot_from_json(baseline.read_text(encoding="utf-8"))
@@ -241,7 +235,7 @@ def verify(
             typer.secho(f"  - {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
 
-    # AI 失败归因（可选）：零差异零调用；观点只进报告单列区（退出码免疫）
+    # AI 归因可选：零差异不调用，观点不影响退出码
     ai_config = ai_config_from_env(dict(os.environ))
     opinions: list[AiOpinion] = []
     if ai_config is not None:
@@ -263,7 +257,7 @@ def verify(
                 encoding="utf-8",
             )
         except OSError as exc:
-            # 报告不可写属环境错误（契约 2），不得让裸 traceback 覆盖验收结论
+            # 报告不可写属环境错误，退出码 2，避免 traceback 覆盖验收结论
             typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=2) from exc
         typer.echo(f"report -> {report_json}", err=True)
@@ -271,7 +265,7 @@ def verify(
     raise typer.Exit(code=outcome.exit_code)
 
 
-# ── 优化车道：optimize ───────────────────────────────────────────────────
+# ── 优化：optimize ───────────────────────────────────────────────────────
 
 
 @app.command()
@@ -297,8 +291,7 @@ def optimize(
 ) -> None:
     """Analyze slow SQL, propose index/rewrite candidates and verify them on a local shadow MySQL.
 
-    AI advisor is optional: set MOUDO_AI_BASE_URL / MOUDO_AI_API_KEY / MOUDO_AI_MODEL (BYOK).
-    Without configuration no network request is made.
+    Optional AI advisor via MOUDO_AI_* env (BYOK); without it no network call is made.
     """
     try:
         baseline_snapshot = snapshot_from_json(baseline.read_text(encoding="utf-8"))
@@ -329,7 +322,7 @@ def optimize(
                 json.dumps(outcome.report_json, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
             )
         except OSError as exc:
-            # 报告不可写属环境错误（契约 2），不得让裸 traceback 覆盖结论
+            # 报告不可写属环境错误，退出码 2，避免 traceback 覆盖结论
             typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=2) from exc
         typer.echo(f"report -> {report_json}", err=True)
@@ -338,7 +331,7 @@ def optimize(
         raise typer.Exit(code=outcome.exit_code)
 
 
-# ── 审核车道：lint ───────────────────────────────────────────────────────
+# ── 审核：lint ───────────────────────────────────────────────────────────
 
 
 @app.command()
@@ -350,8 +343,8 @@ def lint(
 ) -> None:
     """Run static SQL rule checks (no database). Exit 0/1/2.
 
-    Optional AI residual review: set MOUDO_AI_BASE_URL / MOUDO_AI_API_KEY / MOUDO_AI_MODEL (BYOK).
-    Without configuration no network request is made and the report carries no AI section.
+    Optional AI residual review via MOUDO_AI_* env (BYOK); without it no network call is made
+    and the report carries no AI section.
     """
     try:
         lint_config = load_lint_config(config)
@@ -360,7 +353,7 @@ def lint(
         raise typer.Exit(code=2) from exc
 
     disabled = set(lint_config.disabled) | set(skip_rule)
-    # PARSE.001 是引擎产出的工具命中（非规则清单成员），同属可跳过对象
+    # PARSE.001 是引擎产出的工具命中，不在规则清单中，但同样可跳过
     known_rule_ids = {rule.rule_id for rule in RULES} | {PARSE_RULE_ID}
     missing_rules = sorted(disabled - known_rule_ids)
     if missing_rules:
@@ -380,8 +373,7 @@ def lint(
         typer.secho(f"lint failed: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
 
-    # AI 残留评审（可选）：引擎单趟产出的残留面交内置通道出观点；未配置零网络，
-    # 观点只进报告单列区（退出码免疫，opinions 契约模块单源）
+    # AI 残留评审可选：未配置时不联网，观点只写入报告且不影响退出码
     ai_config = ai_config_from_env(dict(os.environ))
     opinions: list[AiOpinion] = []
     if ai_config is not None:
@@ -407,7 +399,7 @@ def lint(
     raise typer.Exit(code=result.exit_code)
 
 
-# ── 洞察车道：patrol ─────────────────────────────────────────────────────
+# ── 洞察：patrol ─────────────────────────────────────────────────────────
 
 patrol_app = typer.Typer(help="漂移巡检：两方漂移 / 未用与冗余索引 / 慢日志指纹聚合。")
 app.add_typer(patrol_app, name="patrol")
@@ -572,8 +564,8 @@ def patrol_summarize(
 ) -> None:
     """Cross-signal patrol digest from existing reports.
 
-    Optional AI narrative: set MOUDO_AI_BASE_URL / MOUDO_AI_API_KEY / MOUDO_AI_MODEL (BYOK).
-    Without configuration no network request is made; opinions never affect the exit code.
+    Optional AI narrative via MOUDO_AI_* env (BYOK); without it no network call is made,
+    and opinions never affect the exit code.
     """
     from modou.patrol.summary import SummaryInputError, summarize_render, summarize_reports
 
@@ -601,7 +593,7 @@ def patrol_summarize(
         typer.secho(f"patrol summarize failed: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
 
-    # AI 跨信号叙事（可选）：digest 是确定性事实，叙事是观点（退出码免疫）
+    # AI 叙事可选：digest 是确定性事实，叙事只是观点，不影响退出码
     ai_config = ai_config_from_env(dict(os.environ))
     opinions: list[AiOpinion] = []
     if ai_config is not None:
@@ -647,7 +639,7 @@ def patrol_slowlog(
     typer.echo(slowlog_render(report))
 
 
-# ── MCP 表面 ─────────────────────────────────────────────────────────────
+# ── MCP 服务 ─────────────────────────────────────────────────────────────
 
 
 @app.command()
@@ -676,14 +668,14 @@ def _resolve_params(
     user: str | None,
     password: str | None,
 ) -> MysqlParams:
-    """连接参数归一（CLI 面）：允许交互提示；实现单源在 modou.params（MCP 同源）。"""
+    """归一连接参数并允许交互提示；实现见 modou.params，MCP 共用。"""
     try:
         return resolve_params(dsn, host, port, user, password, allow_prompt=True)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
 
-# ── 薄报告层：ui ─────────────────────────────────────────────────────────
+# ── 报告 UI ──────────────────────────────────────────────────────────────
 
 
 @app.command()
@@ -699,19 +691,19 @@ def ui(
 
     try:
         for path in report:
-            load_report(path)  # 先全部过门禁，坏输入不进服务
+            load_report(path)  # 先校验全部报告，坏输入不启动服务
         server, _reports = run_ui(list(report), port=port, bind=bind, open_browser=not no_open)
     except (ReportLoadError, UiBindError, OSError) as exc:
-        # OSError 覆盖端口占用/绑定失败（EADDRINUSE 等）：用户可修正的输入错误，退出码 2
+        # 端口占用/绑定失败属用户可修正的输入错误，退出码 2
         typer.secho(f"ui failed: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
     import threading
 
     actual_port = server.server_address[1]
-    # 服务地址无条件可见：无头环境浏览器打不开时用户仍能手动访问
+    # 始终打印地址：无头环境浏览器打不开时可手动访问
     typer.echo(f"serving on http://127.0.0.1:{actual_port} (Ctrl-C to stop)", err=True)
     try:
-        # serve_forever 已由 run_ui 以守护线程启动：主线程只等待中断信号
+        # run_ui 已用守护线程运行 serve_forever，主线程只等待中断
         threading.Event().wait()
     except KeyboardInterrupt:
         pass

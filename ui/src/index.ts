@@ -1,4 +1,4 @@
-// 入口：拉取本机报告端点数据 → 侧栏切换渲染（数据仅来自本机 /api/reports）
+// 从本机 /api/reports 加载报告，并提供侧栏切换。
 import "./styles.css";
 import { renderReport } from "./views";
 import { el } from "./views";

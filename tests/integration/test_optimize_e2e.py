@@ -1,8 +1,6 @@
-"""optimize 车道影子集成测试（MOUDO_TEST_SHADOW=1 门禁）：采样采集 → 数据灌入 →
-实测判定 → 实证关（AI 无效建议被拦截）。
+"""optimize 影子集成测试（MOUDO_TEST_SHADOW=1）：采样采集、数据灌入、实测判定与实证拦截。
 
-每测试使用独立库名：注入的会话级影子容器会被多个测试复用，restore 不删除已存在
-对象，库名隔离避免 CREATE TABLE 冲突。
+每个测试使用独立库名，避免复用影子容器时 CREATE TABLE 冲突。
 """
 
 from __future__ import annotations
@@ -83,7 +81,7 @@ class TestOptimizeShadowE2E:
             assert cursor.fetchone()[0] == 500
 
     def test_effective_index_measured(self, mysql_server, mysql_conn) -> None:
-        """有效索引候选：影子实测代价下降 → measured + 提升幅度，退出码 0。"""
+        """有效索引候选应实测代价下降，标记 measured 并返回 0。"""
         source_db = unique_db("opt_eff")
         _setup_orders(mysql_conn, source_db)
         target_db = unique_db("opt_eff_t")
@@ -104,8 +102,7 @@ class TestOptimizeShadowE2E:
         assert outcome.report_json["evidence_env"]["tables"]
 
     def test_ai_bogus_suggestion_intercepted_by_evidence(self, mysql_server, mysql_conn, monkeypatch) -> None:
-        """实证关（ADR-0003）：AI 产出的低选择性索引建议实测无提升 → 标「未验证」，
-        报告与退出码不受 AI 输出影响（退出码保持 0）。"""
+        """低选择性 AI 索引未带来实测提升时标为未验证，且退出码不受 AI 输出影响。"""
         import modou.optimize.pipeline as pipeline_module
 
         source_db = unique_db("opt_ai")
@@ -114,13 +111,12 @@ class TestOptimizeShadowE2E:
         snapshot = _capture_renamed(mysql_server, source_db, target_db, sample_rows=1000)
 
         def fake_advisor(*args, **kwargs):
-            # 模拟 AI 幻觉式建议：对 status（仅 3 个取值）建独立索引
+            # 模拟 AI 建议：对只有 3 个取值的 status 建独立索引
             return [IndexCandidate(None, "orders", ["status"], "AI 建议索引", source="ai")]
 
         monkeypatch.setattr(pipeline_module, "maybe_fetch_candidates", fake_advisor)
         outcome = run_optimize(
-            # 语句只涉及 amount（规则候选在 amount 上）；AI 建议在 status 上（与规则候选
-            # 不同列，不会被去重）——低选择性索引实测无提升，必须被实证关拦下
+            # 规则候选在 amount，AI 建议在 status，不会被去重；低选择性索引必须被实证拦下
             ["SELECT * FROM orders WHERE amount > 100"],
             snapshot,
             default_database=target_db,
@@ -131,17 +127,17 @@ class TestOptimizeShadowE2E:
         suggestions = _suggestions_of(outcome, target_db)
         ai_suggestions = [s for s in suggestions if s["source"] == "ai"]
         assert ai_suggestions, "AI candidate should reach the evidence stage"
-        # 低选择性索引在 2000 行表上不会有实质提升：必须被实证关拦下
+        # 低选择性索引在 2000 行表上无实质提升，必须被拦下
         assert all(s["status"] == "unverified" for s in ai_suggestions)
         assert all("代价未降低" in (s["reason"] or "") for s in ai_suggestions)
-        # 候选索引已被回滚删除：影子表索引数恢复基线
+        # 候选索引已回滚，索引数恢复基线
         with mysql_conn.cursor() as cursor:
             cursor.execute(f"SHOW INDEX FROM `{target_db}`.`orders`")
             names = {row[2] for row in cursor.fetchall()}
         assert names == {"PRIMARY"}
 
     def test_redundant_candidate_skips_evidence(self, mysql_server, mysql_conn) -> None:
-        """冗余候选（被现有索引前缀覆盖）：确定性判定跳过实证，标「未验证（冗余）」。"""
+        """被现有索引前缀覆盖的候选跳过实证，标为未验证。"""
         source_db = unique_db("opt_red")
         _setup_orders(mysql_conn, source_db, with_created_index=True)
         target_db = unique_db("opt_red_t")
@@ -154,7 +150,7 @@ class TestOptimizeShadowE2E:
         redundant = [s for s in suggestions if s.get("reason", "") and "冗余" in s["reason"]]
         assert redundant, f"expected redundant candidate, got {suggestions}"
         assert all(s["status"] == "unverified" for s in redundant)
-        # 冗余候选未做实证：cost_after 保持 None（未建索引）
+        # 冗余候选未实证，cost_after 保持 None
         assert all(s["cost_after"] is None for s in redundant)
 
     def test_ddl_and_unsampled_input_exit_2(self, mysql_server, mysql_conn) -> None:
@@ -175,7 +171,7 @@ class TestOptimizeShadowE2E:
 
 
 def test_generated_column_sampling_roundtrip(mysql_server) -> None:
-    """生成列表采样灌入回归：显式赋值生成列的 INSERT 报 3105，采样列清单必须排除它。"""
+    """采样列清单排除生成列，避免灌入时显式赋值失败。"""
     from modou.snapshot.restore import restore_snapshot
 
     source = unique_db("opt_gen_src")

@@ -142,7 +142,7 @@ class TestTwoWayDiff:
 
 
 class TestWhitespaceOnlyDdl:
-    """评审回归：DDL 仅空白差异不是漂移（比较与展示同一归一口径）。"""
+    """DDL 仅有空白差异时不报告漂移。"""
 
     def test_whitespace_only_view_change_is_not_drift(self) -> None:
 

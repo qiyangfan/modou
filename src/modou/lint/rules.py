@@ -1,9 +1,4 @@
-"""首批规则库：SOAR 高频反模式子集 26 条（ID 沿用 SOAR 编号，降低迁移心智）。
-
-选型依据（change design §1/§2）：SOAR 125 条中约 120 条为纯静态判定；首批取
-SOAR × Bytebase 共识高频反模式，全部单树 AST 可判定（sqlglot，唯一解析器）。
-排除需 schema/连库/流程性的 ARG.003、KEY.009、SEC.003。文档见 docs/rules.md。
-"""
+"""基于 sqlglot AST 的 SOAR 高频反模式规则库；规则范围与判定规则见 ``docs/rules.md``。"""
 
 from __future__ import annotations
 
@@ -28,8 +23,7 @@ _INT_DTYPE_NAMES = {
     "USMALLINT",
     "UMEDIUMINT",
     "UBIGINT",
-    # MySQL 整型别名：SERIAL = BIGINT UNSIGNED NULL AUTO_INCREMENT UNIQUE，
-    # BOOLEAN/BOOL = TINYINT(1)
+    # MySQL 别名：SERIAL 等价 BIGINT UNSIGNED AUTO_INCREMENT UNIQUE，BOOLEAN/BOOL 等价 TINYINT(1)
     "SERIAL",
     "BOOLEAN",
     "BOOL",
@@ -43,7 +37,7 @@ _ARITHMETIC_NODES = (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod)
 
 
 def _column_defs(tree: exp.Expression) -> list[exp.ColumnDef]:
-    """CREATE TABLE 的列定义清单（非建表语句返回空）。"""
+    """返回 CREATE TABLE 的列定义；非建表语句返回空。"""
     if not isinstance(tree, exp.Create) or tree.kind != "TABLE":
         return []
     schema = tree.this
@@ -62,9 +56,7 @@ def _table_constraints(tree: exp.Expression) -> list[exp.Expression]:
 
 
 def _flattened_table_constraints(tree: exp.Expression) -> list[exp.Expression]:
-    """表级约束的展平视图：具名 `CONSTRAINT <名> PRIMARY KEY/UNIQUE/KEY` 在 sqlglot
-    里是 exp.Constraint（名字在 this，真实约束在 expressions），mysqldump 高频形态
-    ——不解包会被 KEY.002/005/007 整体漏判。"""
+    """展开具名 CONSTRAINT 内的主键和索引约束。"""
     flattened: list[exp.Expression] = []
     for constraint in _table_constraints(tree):
         if isinstance(constraint, exp.Constraint):
@@ -90,8 +82,7 @@ def _has_constraint_of(coldef: exp.ColumnDef, constraint_type: type) -> bool:
 
 
 def _index_column_name(index: exp.Expression) -> str:
-    """索引约束的显式名：普通 KEY 的 this 是 Identifier；UNIQUE KEY 的 this 是
-    Schema（this=名称 Identifier, expressions=列）。"""
+    """读取普通 KEY 或 UNIQUE KEY 的显式索引名。"""
     this = index.args.get("this")
     if isinstance(this, exp.Schema):
         return this.this.name if isinstance(this.this, exp.Identifier) else ""
@@ -99,12 +90,7 @@ def _index_column_name(index: exp.Expression) -> str:
 
 
 def _naming_pairs(tree: exp.Expression) -> list[tuple[str, str]]:
-    """(索引名, 期望前缀) 清单：表级 UNIQUE KEY（uk_）与普通 KEY（idx_），
-    含具名 `CONSTRAINT <名> UNIQUE/KEY` 形态（约束名即索引名）。
-
-    FULLTEXT/SPATIAL（args.kind 标注）命名不属 idx_/uk_ 口径，豁免；列级
-    UNIQUE 由 MySQL 自动命名（无显式名可查），不参与判定。
-    """
+    """返回表级 UNIQUE KEY 与普通 KEY 的命名检查项；FULLTEXT、SPATIAL 和列级 UNIQUE 不检查。"""
     pairs: list[tuple[str, str]] = []
 
     def fulltext_or_spatial(node: exp.Expression) -> bool:
@@ -126,12 +112,7 @@ def _naming_pairs(tree: exp.Expression) -> list[tuple[str, str]]:
 
 
 def _wrapped_predicate_columns(node: exp.Expression | None) -> list[exp.Column]:
-    """比较节点两侧被函数/运算实际包裹的列（去重，保持出现顺序）。
-
-    逐包裹节点收集其内部列，而非收集全部列再判包裹——保证消息只归属真实
-    被包裹的列（`a = b + 1` 只指认 b，不误述裸列 a）；越过查询边界（子查询/
-    集合操作）的包裹属于嵌套查询自己的谓词，不归本层比较。
-    """
+    """返回比较表达式中被函数或运算包裹的列，去重并保持顺序；不跨子查询和集合操作。"""
     if node is None:
         return []
 
@@ -160,18 +141,12 @@ def _is_prefix_wildcard_like(like: exp.Expression) -> bool:
 
 
 def _pk_column_name(pk_part: exp.Expression) -> str:
-    """主键列名：不同 sqlglot 版本下可能是 Column 或 Identifier，取 name 统一口径。"""
+    """取主键列名；sqlglot 各版本可能给出 Column 或 Identifier。"""
     return pk_part.name if hasattr(pk_part, "name") else ""
 
 
 def _has_pk_or_unique(tree: exp.Expression) -> bool:
-    """建表语句是否声明了主键或唯一键（列级、表级、具名 CONSTRAINT 形态都要看）。
-
-    sqlglot 形态：`id INT PRIMARY KEY` 是 ColumnDef 上的 PrimaryKeyColumnConstraint，
-    表级 PRIMARY KEY 是 exp.PrimaryKey，UNIQUE（列级与表级 UNIQUE KEY 同形）是
-    UniqueColumnConstraint，`CONSTRAINT <名> PRIMARY KEY/UNIQUE` 是 exp.Constraint
-    包裹（见 _flattened_table_constraints）——只看表级约束会漏掉最常见的列级写法。
-    """
+    """判断建表语句是否声明主键或唯一键（含列级、表级和具名约束）。"""
     for coldef in _column_defs(tree):
         if _has_constraint_of(coldef, (exp.PrimaryKeyColumnConstraint, exp.UniqueColumnConstraint)):
             return True
@@ -179,7 +154,7 @@ def _has_pk_or_unique(tree: exp.Expression) -> bool:
 
 
 def _pk_column_defs(tree: exp.Expression) -> list[exp.ColumnDef]:
-    """主键列的列定义（列级 PRIMARY KEY + 表级/具名 CONSTRAINT PRIMARY KEY 归一）。"""
+    """返回主键列定义，合并列级与表级/具名 CONSTRAINT 声明。"""
     by_name = {coldef.name: coldef for coldef in _column_defs(tree)}
     names = [coldef.name for coldef in _column_defs(tree) if _has_constraint_of(coldef, exp.PrimaryKeyColumnConstraint)]
     for constraint in _flattened_table_constraints(tree):
@@ -198,8 +173,7 @@ def _pk_column_defs(tree: exp.Expression) -> list[exp.ColumnDef]:
 
 
 def _secondary_index_count(tree: exp.Expression) -> int:
-    """建表语句声明的二级索引数：表级 KEY/UNIQUE KEY（含 FULLTEXT/SPATIAL，含具名
-    CONSTRAINT 形态）+ 列级 UNIQUE。列级 UNIQUE 同样建二级索引；主键不计。"""
+    """统计二级索引数；列级 UNIQUE 计入，主键不计。"""
     count = sum(
         1
         for c in _flattened_table_constraints(tree)

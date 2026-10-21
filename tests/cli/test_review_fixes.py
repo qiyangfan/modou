@@ -1,4 +1,4 @@
-"""评审修复的回归测试：pack 序号对齐、多库报告本地计数、快照 JSON 防御、子目录警告。"""
+"""CLI 和快照边界测试：序号对齐、多库计数、JSON 校验和子目录警告。"""
 
 import json
 from pathlib import Path
@@ -11,7 +11,7 @@ from modou.diff.threeway import KIND_MISSING, ObjectConclusion
 from modou.report.render import KIND_LABELS, VerifyReport, render_text
 from modou.snapshot.model import snapshot_from_json
 
-# ── D4：文件末条语句缺分隔符 → 拒绝打包（预警序号与回放序号不得错位） ────────────
+# ── 文件末条语句缺分隔符 → 拒绝打包（预警序号与回放序号不得错位） ────────────
 
 
 def test_pack_rejects_file_missing_trailing_delimiter(tmp_path: Path) -> None:
@@ -38,7 +38,7 @@ def test_pack_aligned_indices_when_files_end_with_delimiter(tmp_path: Path) -> N
     assert result.warnings[0].statement_index == 2
 
 
-# ── D5：多库文本报告库头不带计数、计数只在尾部汇总行出现 ─────────────────────
+# ── 多库报告的尾部汇总计数 ─────────────────────────────────────────────────
 
 
 def _conclusion(db: str, name: str, kind: str) -> ObjectConclusion:
@@ -70,7 +70,7 @@ def test_single_database_report_keeps_inline_counts() -> None:
     assert KIND_LABELS[KIND_MISSING] in text and "1" in text
 
 
-# ── S7：非对象 JSON 快照 → 明确 ValueError 而非裸 AttributeError ─────────────
+# ── 非对象 JSON 快照 → ValueError ──────────────────────────────────────────
 
 
 def test_snapshot_from_json_rejects_non_object() -> None:
@@ -78,7 +78,7 @@ def test_snapshot_from_json_rejects_non_object() -> None:
         snapshot_from_json(json.dumps([1, 2, 3]))
 
 
-# ── S9：子目录中的 .sql 不属于变更集 → 警告提示 ──────────────────────────────
+# ── 子目录中的 .sql 不属于变更集 → 警告提示 ──────────────────────────────
 
 
 def test_discovery_warns_on_nested_sql_files(tmp_path: Path) -> None:
@@ -92,7 +92,7 @@ def test_discovery_warns_on_nested_sql_files(tmp_path: Path) -> None:
     assert any("backup/old.sql" in w for w in result.warnings)
 
 
-# ── S7b：容器型字段的 JSON 畸形 → 明确 ValueError 而非裸 AttributeError ────────
+# ── 容器型字段的 JSON 畸形 → ValueError ────────────────────────────────────
 
 
 def _valid_meta_dict() -> dict:

@@ -9,7 +9,7 @@ from modou.params import resolve_params as _resolve_params
 
 
 def test_dsn_explicit_empty_password_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`mysql://u:@h` 的空口令是显式配置：is not None 判别不得把它丢给 env/交互提示。"""
+    """`mysql://u:@h` 的空口令是显式配置，不能被 env 或交互提示覆盖。"""
     monkeypatch.delenv("MOUDO_MYSQL_PASSWORD", raising=False)
     params = _resolve_params("mysql://u:@h1:3307", None, None, None, None)
     assert params.password == ""
@@ -23,14 +23,14 @@ def test_percent_encoded_password_is_decoded(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_dsn_password_beats_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DSN 内嵌口令是本次调用的显式输入，不得被环境状态静默覆盖（libpq/mysql 同款）。"""
+    """DSN 中的口令优先于环境变量。"""
     monkeypatch.setenv("MOUDO_MYSQL_PASSWORD", "envpass")
     params = _resolve_params("mysql://u:dsnpass@h", None, None, None, None)
     assert params.password == "dsnpass"
 
 
 def test_env_falls_back_when_dsn_has_no_password(monkeypatch: pytest.MonkeyPatch) -> None:
-    """口令放 env、脚本写无口令 DSN 的安全用法不受优先级反转影响。"""
+    """DSN 无口令时使用 env 口令，不受优先级反转影响。"""
     monkeypatch.setenv("MOUDO_MYSQL_PASSWORD", "envpass")
     params = _resolve_params("mysql://u@h", None, None, None, None)
     assert params.password == "envpass"

@@ -1,12 +1,6 @@
-"""索引副作用检查：冗余三情形、外键依赖、索引数上限与写放大（确定性，纯元数据）。
+"""检查索引候选的冗余、外键依赖、数量上限和写放大。
 
-冗余判定对齐 sys.schema_redundant_indexes 源码语义（2026-10 调研核实）：
-1. duplicate：列集合完全相同；
-2. prefix_non_unique：非唯一索引的列序列是另一索引的列前缀 → 前缀者冗余
-   （唯一性语义不可丢：冗余方必须非唯一）；
-3. unique_prefix：唯一索引的列是另一索引的列前缀 → 更长的那条冗余。
-
-函数/表达式索引没有可比的普通列序：跳过比较（宁可漏报不误判）。
+按列与前缀长度识别重复或冗余索引；表达式索引不参与比较；唯一索引和外键依赖影响冗余方向。
 """
 
 from __future__ import annotations
@@ -15,18 +9,13 @@ from dataclasses import dataclass
 
 from modou.snapshot.model import TableDef
 
-# 单表二级索引数上限默认值（宪法口径：阈值可配置）
+# 单表二级索引数上限，可由 CLI 覆盖
 DEFAULT_INDEX_COUNT_LIMIT = 10
 
 
 @dataclass
 class IndexView:
-    """可比索引视图：仅保留非表达式部分的列序。
-
-    columns 供展示；keys 供比较——带 (列, 前缀长度) 整体比较，前缀索引
-    （如 a(64)）与完整列索引不等价，不得互判冗余。keys 缺省时从 columns
-    派生为完整列（sub_part=None），手工构造视图语义不变。
-    """
+    """用于比较的索引视图；键包含列与前缀长度，前缀索引不等同于整列索引。"""
 
     name: str
     columns: list[str]
@@ -51,8 +40,7 @@ def index_views_from_table(table: TableDef) -> list[IndexView]:
     views: list[IndexView] = []
     for index in table.indexes:
         keys = [(part.column, part.sub_part) for part in index.parts if part.column]
-        # 含任一表达式部分（如 (LOWER(name), age)）即整条不可比：最左前缀是表达式，
-        # 普通列序比较会误判冗余（宁可漏报不误判，见模块 docstring）
+        # 含表达式部分（如 (LOWER(name), age)）即整条不可比；宁可漏报，避免误判冗余
         expression_only = any(part.column is None or part.expression for part in index.parts)
         views.append(
             IndexView(
@@ -67,7 +55,7 @@ def index_views_from_table(table: TableDef) -> list[IndexView]:
 
 
 def fk_required_index_names(table: TableDef) -> set[str]:
-    """被外键依赖的索引名：外键列序列是索引列前缀的索引即被依赖。"""
+    """返回外键依赖的索引名：外键列是索引前缀即视为依赖。"""
     required: set[str] = set()
     for fk in table.foreign_keys:
         for index in table.indexes:
@@ -78,11 +66,7 @@ def fk_required_index_names(table: TableDef) -> set[str]:
 
 
 def find_redundant_pairs(pool: list[IndexView]) -> list[tuple[IndexView, IndexView, str]]:
-    """对索引池做两两冗余判定，返回（冗余方, 主导方, 情形）清单。
-
-    池序决定 duplicate 情形下谁被判冗余：调用方把「建议新增的候选」放最前，
-    既有索引按名排序在后——重复时候选方被判冗余（不动既有结构）。
-    """
+    """两两比较索引，返回冗余方、主导方和情形；重复索引按输入顺序判定。"""
     redundant: list[tuple[IndexView, IndexView, str]] = []
     comparable = [view for view in pool if not view.expression_only and view.keys]
     for i in range(len(comparable)):
@@ -110,7 +94,7 @@ def check_candidate_side_effects(
     *,
     index_count_limit: int = DEFAULT_INDEX_COUNT_LIMIT,
 ) -> list[SideEffectNote]:
-    """对一条索引候选做确定性副作用检查，返回附注清单（建议随附）。"""
+    """检查一条索引候选的副作用，返回随建议展示的附注。"""
     notes: list[SideEffectNote] = []
     candidate = IndexView(
         name="(候选)",

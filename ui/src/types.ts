@@ -1,4 +1,4 @@
-// 报告载荷类型：与 docs/formats.md 各 report_kind 契约对应（渲染层只读，不做二次计算）
+// 报告载荷类型与 docs/formats.md 对应；前端只读渲染。
 
 export type ReportKind =
   | "verify"
@@ -30,7 +30,7 @@ export const KIND_LABELS: Record<ReportKind, string> = {
   patrol_summary: "综合巡检",
 };
 
-// AI 观点（report.opinions.AiOpinion 契约）：两级标注的呈现面，渲染只读不计算
+// AI 观点载荷；前端只读呈现。
 export interface AiOpinion {
   lane: string;
   subject: string;

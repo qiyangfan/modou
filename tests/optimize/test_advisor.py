@@ -78,7 +78,7 @@ class TestPayloadBoundary:
                 AdvisorConfig("https://x/v1", "k", "m"), "SELECT * FROM orders WHERE user_id = 1", summary
             )
         )
-        # 载荷红线：仅 SQL 文本与 schema 摘要，绝无数据行
+        # 载荷只含 SQL 文本与 schema 摘要，不含数据行
         assert "SECRET_ROW_VALUE" not in payload_text
 
     def test_summary_limited_to_requested_databases(self) -> None:

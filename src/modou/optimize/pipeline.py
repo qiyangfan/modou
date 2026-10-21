@@ -1,14 +1,6 @@
-"""优化实证管线：输入校验 → 影子库采样灌入 → 逐候选「基线 → 应用 → 刷新统计 →
-复测」→ 两级状态判定 → 按库分组报告。
+"""在影子库逐个验证索引与改写建议，并按库生成报告。
 
-流程口径（v0.2 design §2/§4，2026-10 调研核实）：
-- 空表 EXPLAIN 无代价差异：输入必须为采样快照（无数据 → 输入错误，指引重采）；
-- InnoDB 统计为随机采样且 ADD INDEX 无条件刷新统计：基线与复测两侧各自显式
-  ANALYZE 拉平口径，候选落地后（删除后同理）再刷新一次；
-- 实证关（ADR-0003）：任何来源的建议都以「估计代价下降」为实测提升的必要条件；
-  冗余候选（确定性判定已覆盖）不浪费影子实证，直接标「未验证（冗余）」；
-- EXPLAIN ANALYZE 会真实执行语句：只对 SELECT 取实测耗时参考，DML 绝不执行；
-- 单候选环境失败不中断管线（标「未验证（环境原因）」），整体退出码不受 AI 影响。
+用候选前后的估计代价判定提升；EXPLAIN ANALYZE 只用于 SELECT 且仅作参考；单候选失败只降级，不中断整条流程。
 """
 
 from __future__ import annotations
@@ -44,7 +36,7 @@ from modou.snapshot.introspect import read_meta
 from modou.snapshot.model import Snapshot, TableDef
 from modou.snapshot.restore import restore_snapshot
 
-# 报告正文随附的实证口径声明
+# 报告附带的实证说明
 EVIDENCE_NOTE = (
     "代价为优化器估计（基于采样统计），无官方同值保证；"
     "提升幅度 =（基线代价 − 复测代价）/ 基线代价，影子库与目标库大版本一致"
@@ -52,7 +44,7 @@ EVIDENCE_NOTE = (
 
 
 class OptimizeInputError(Exception):
-    """optimize 输入错误（快照无采样数据/语句类型不支持等），映射退出码 2。"""
+    """optimize 输入错误，映射退出码 2。"""
 
     def __init__(self, errors: list[str]) -> None:
         super().__init__("; ".join(errors))
@@ -88,7 +80,7 @@ def judge_improvement(cost_before: float | None, cost_after: float | None) -> tu
 def validate_inputs(
     statements: list[str], baseline: Snapshot, *, default_database: str | None = None
 ) -> list[StatementAnalysis]:
-    """输入校验：非空、版本地板、采样数据在场、语句可解析且类型支持、目标库在快照内。"""
+    """校验语句、版本、采样数据和快照覆盖范围。"""
     errors: list[str] = []
     if not statements:
         raise OptimizeInputError(["no statements to optimize"])
@@ -139,10 +131,7 @@ def resolve_candidates(
     candidates: list[IndexCandidate],
     tables_map: dict[str, dict[str, TableDef]],
 ) -> tuple[list[dict], list[str]]:
-    """候选校验与物化：表/列必须真实存在（AI 幻觉防线），产出建议条目。
-
-    返回（建议清单, 丢弃原因清单）。索引候选物化为 DDL；改写候选原样透传。
-    """
+    """校验候选引用的表与列，生成建议及丢弃原因，并把索引候选转为 DDL。"""
     suggestions: list[dict] = []
     dropped: list[str] = []
     seen: set[tuple[str | None, str, tuple[str, ...]]] = set()
@@ -205,10 +194,7 @@ def run_optimize(
     keep_container: bool = False,
     shadow: ShadowMySQL | None = None,
 ) -> OptimizeOutcome:
-    """执行完整优化实证。容器用后即焚（keep_container=True 保留排查）。
-
-    shadow 参数供测试/复用注入已启动容器：注入时本函数不拉起也不销毁。
-    """
+    """执行完整优化实证；默认销毁自建容器，注入的容器不接管生命周期。"""
     try:
         analyses = validate_inputs(statements, baseline, default_database=default_database)
     except OptimizeInputError as exc:
@@ -251,7 +237,7 @@ def _optimize_on_shadow(
             shadow, baseline, analyses, involved_dbs, tables_map, advisor_config, index_count_limit
         )
     except (pymysql.err.MySQLError, OSError, RuntimeError, ValueError) as exc:
-        # 影子阶段意外收敛为退出码 2（编程错误类异常不在此网内，保持响亮）
+        # 影子阶段运行异常收敛为退出码 2；编程错误不捕获
         return _error_outcome([f"shadow operation failed: {exc}"])
 
 
@@ -323,24 +309,23 @@ def _measure_statement(
     index_count_limit: int,
     advisor_dropped: list[str],
 ) -> dict:
-    """单语句：基线计划 → 规则候选 + AI 候选 → 逐候选实证 → 两级状态。"""
+    """测量单条语句：基线计划、规则与 AI 候选、逐候选实证、两级状态。"""
     sql = analysis.sql
     baseline_plan = explain_json(conn, sql)
     actual_before = _reference_actual_ms(conn, analysis)
 
-    # 事实预取打包（v0.5 受控多轮的确定性半区）：候选生成基于基线实测计划，
-    # 实证关与副作用检查不变——AI 候选仍逐个过影子实证
+    # AI 候选与规则候选一样，都需通过影子库实证。
     ai_candidates = maybe_fetch_candidates(
         advisor_config,
         sql,
         schema_summary,
         explain_facts={"query_cost": baseline_plan.query_cost, "table_accesses": baseline_plan.table_accesses},
     )
-    # AI 候选通常不带库限定：归属到当前语句的库（表名校验在 resolve_candidates 中兜底）
+    # AI 候选通常不带库名，归属当前语句的库；表名校验在 resolve_candidates
     for candidate in ai_candidates:
         if candidate.kind == "index" and candidate.database is None and analysis.database is not None:
             candidate.database = analysis.database
-    # AI 索引候选同样受每语句候选上限约束（上限约束的是影子实证成本，来源无关）
+    # AI 索引候选也受每语句上限约束；上限约束的是影子实证成本
     kept_ai: list[IndexCandidate] = []
     ai_index_count = 0
     for candidate in ai_candidates:
@@ -394,7 +379,7 @@ def _measure_suggestion(
     baseline_cost: float | None,
     baseline_rows: list[dict],
 ) -> dict:
-    """单候选：副作用检查 → 实证（或确定性跳过）→ 两级状态判定。"""
+    """测量单个候选：副作用检查、实证或跳过、状态判定。"""
     result: dict = {
         "source": suggestion["source"],
         "kind": suggestion["kind"],
@@ -433,7 +418,7 @@ def _evidence_index_candidate(
     result: dict,
     actual_before: float | None,
 ) -> dict:
-    """索引候选实证：应用 DDL → 刷新统计 → 复测 → 删除回滚 → 再刷新统计。"""
+    """实证索引候选：建索引、刷新统计、复测，再删除并刷新统计。"""
     db_name = suggestion["database"]
     table_name = suggestion["table"]
     index_name = index_name_for_candidate(suggestion["columns"])
@@ -461,7 +446,7 @@ def _evidence_index_candidate(
         result["status"] = STATUS_UNVERIFIED
         result["reason"] = f"影子实证环境原因（{stage} 阶段）：{exc}"
         if applied:
-            # 索引已落地：回滚尽力而为；删除失败必须披露（残留索引会让后续候选基线偏高）
+            # 索引已落地时尽力回滚；删除失败必须披露，否则后续候选基线会偏高
             try:
                 drop_candidate_index()
             except (pymysql.err.MySQLError, ValueError) as drop_exc:
@@ -490,7 +475,7 @@ def _evidence_rewrite_candidate(
     suggestion: dict,
     result: dict,
 ) -> dict:
-    """改写候选实证：仅 EXPLAIN（绝不执行改写语句），与基线代价对比。"""
+    """只用 EXPLAIN 评估改写语句，与基线代价对比；不执行改写。"""
     try:
         after_plan = explain_json(conn, suggestion["content"])
     except (pymysql.err.MySQLError, ValueError) as exc:
@@ -509,8 +494,7 @@ def _evidence_rewrite_candidate(
 
 
 def _reference_actual_ms(conn: pymysql.connections.Connection, analysis: StatementAnalysis) -> float | None:
-    """EXPLAIN ANALYZE 实测耗时（参考信息）：仅对 SELECT 执行——DML 会真实生效，
-    绝不对 UPDATE/DELETE 跑 ANALYZE（红线：影子库实证不污染自身环境）。"""
+    """对 SELECT 执行 EXPLAIN ANALYZE 取参考耗时；DML 不执行。"""
     if not analysis.is_select:
         return None
     try:
@@ -530,8 +514,7 @@ def _sampled_tables(baseline: Snapshot, dbs: list[str]) -> list[tuple[str, str]]
 
 
 def _evidence_tables(baseline: Snapshot, dbs: list[str]) -> list[dict]:
-    """实证环境数据规模声明：涉及库的全部表都列出——未采样表 sampled_rows=None，
-    让「该表没有数据支撑代价对比」在报告里可见，而非静默缺席。"""
+    """列出涉及库的全部表；未采样表的 sampled_rows 为 None。"""
     tables: list[dict] = []
     for db in dbs:
         if db not in baseline.databases:

@@ -1,4 +1,4 @@
-"""审核车道（lint）：纯静态规则引擎，SOAR 高频反模式子集（v0.4a）。"""
+"""静态 SQL 规则审核。"""
 
 from modou.lint.engine import (
     LEVEL_ERROR,

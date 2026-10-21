@@ -1,8 +1,6 @@
-"""优化报告：人读文本 + 机读 JSON 双出口（report_kind=optimize，独立于 verify 契约）。
+"""生成 SQL 优化报告（report_kind=optimize）。
 
-两级状态是全局统一口径（ADR-0003）：每条建议处于且仅处于「实测提升（附实证数据）」
-或「未验证（附原因）」；退出码 0=报告产出 / 2=环境或输入错误，1 不使用
-（建议性输出不构成验收结论，退出码永远不受 AI 输出影响）。
+建议标记为「实测提升」或「未验证」；退出码只反映报告成败，不受 AI 观点影响。
 """
 
 from __future__ import annotations
@@ -25,7 +23,7 @@ STATUS_LABELS: dict[str, str] = {
 
 
 def report_to_json(report: dict) -> dict:
-    """机读出口：深拷贝并附格式标识（与 CLI --report-json 同源）。"""
+    """返回深拷贝并附报告格式标识。"""
     import copy
 
     payload = copy.deepcopy(report)
@@ -35,7 +33,7 @@ def report_to_json(report: dict) -> dict:
 
 
 def render_text(report: dict) -> str:
-    """人读文本（中文正文）：按库分组，逐语句列发现、建议两级状态与副作用附注。"""
+    """生成中文优化报告，按库列出语句、发现、建议状态与副作用。"""
     lines: list[str] = ["墨斗优化报告", "＝" * 40]
 
     for error in report.get("env_errors", []):

@@ -1,4 +1,4 @@
-"""快照采集编排：采集 → 写文件。CLI 只做参数解析与展示，逻辑全部在内核库。"""
+"""快照采集编排：采集并写入 JSON 文件。"""
 
 from __future__ import annotations
 
@@ -20,10 +20,7 @@ def capture_to_file(
     *,
     sample_rows: int | None = None,
 ) -> Snapshot:
-    """采集指定库清单并写入 JSON 文件，返回快照供调用方摘要展示。
-
-    sample_rows 给定时为采样模式（format v2）：附确定性样本数据供影子实证。
-    """
+    """采集指定库并写入 JSON 文件；sample_rows 给定时附带确定性样本。"""
     snapshot = capture_snapshot(params, database_names, sample_rows=sample_rows)
     write_snapshot(snapshot, output_path)
     return snapshot

@@ -1,10 +1,6 @@
-"""AI 观点区契约（v0.5，ADR-0009 结论两级分级）：各车道报告的唯一口径。
+"""统一管理报告中的 AI 观点；观点独立于确定性结论和退出码。
 
-- 实证已验证：报告既有正文字段（确定性代码 + 影子库实测），唯一决定退出码；
-- AI 观点：ai_opinions 单列区，附来源与「未实证」标注，永不影响退出码；
-- 未配置 BYOK：车道不产出观点，报告不含 ai_opinions 键——attach 空清单是
-  恒等函数（未配置与 v0.4 零差异的机械保证，契约测试守护）；
-- 调用失败：降级条目（status=degraded）标注原因，报告照常产出，退出码不变。
+未配置 BYOK 时报告不含 ``ai_opinions``；调用失败时添加带原因的降级条目。
 """
 
 from __future__ import annotations
@@ -20,7 +16,7 @@ STATUS_DEGRADED = "degraded"
 
 @dataclass
 class AiOpinion:
-    """单条 AI 观点：对象定位 + 文本 + 来源标注（模型名）+ 状态。"""
+    """单条 AI 观点，包含定位、文本、模型名与状态。"""
 
     lane: str
     subject: str
@@ -31,7 +27,7 @@ class AiOpinion:
 
 
 def degraded(lane: str, subject: str, model: str, reason: str) -> AiOpinion:
-    """降级条目工厂：调用失败也进观点区（标注原因），不静默缺席。"""
+    """生成降级条目，让调用失败在观点区可见并注明原因。"""
     return AiOpinion(
         lane=lane, subject=subject, opinion="", model=model, status=STATUS_DEGRADED, degraded_reason=reason
     )
@@ -53,10 +49,7 @@ def opinions_to_json(opinions: Sequence[AiOpinion]) -> list[dict]:
 
 
 def attach_ai_opinions(report: dict, opinions: Sequence[AiOpinion]) -> dict:
-    """把观点并入报告 JSON：空清单原样返回（零差异），否则浅拷贝加单键。
-
-    不改写既有字段、不读不写 exit_code（退出码免疫由「从不接触」结构性保证）。
-    """
+    """把观点并入报告 JSON；空清单原样返回，否则浅拷贝并添加 ai_opinions，不改动 exit_code。"""
     if not opinions:
         return report
     merged = dict(report)
@@ -65,7 +58,7 @@ def attach_ai_opinions(report: dict, opinions: Sequence[AiOpinion]) -> dict:
 
 
 def render_opinions_section(opinions: Sequence[AiOpinion]) -> str:
-    """人读文本的观点区（追加在报告正文之后）：空清单返回空串（无该区）。"""
+    """生成人读观点区；空清单返回空串。"""
     if not opinions:
         return ""
     lines = ["", "── AI 观点（模型输出·未经实证·不影响退出码）──"]

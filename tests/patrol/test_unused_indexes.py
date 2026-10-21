@@ -105,8 +105,7 @@ class TestRedundantOffline:
     def test_fk_protected_redundancy_flagged(self) -> None:
         fk = ForeignKeyDef("fk_user", ["user_id"], "users", ["id"], "NO ACTION", "NO ACTION")
         inv = _inv([_table(indexes=[_idx("idx_ab", ["user_id", "b"])], fks=[fk])])
-        # idx_ab 是 FK 依赖索引且被 PRIMARY 前缀覆盖？PRIMARY 未列出，不判冗余；
-        # 构造 UNIQUE(user_id) 使 idx_ab 冗余但 idx_ab 被 FK 保护
+        # 用 UNIQUE(user_id) 使 idx_ab 冗余，同时 idx_ab 受外键保护
         inv.tables["orders"].indexes.append(_idx("uk_user", ["user_id"], unique=True))
         redundancies = find_redundant_from_inventory(inv)
         target = [r for r in redundancies if r.redundant_index == "idx_ab"]
@@ -154,7 +153,7 @@ class _FakeConn:
 
 class TestReadUptime:
     def test_missing_uptime_row_is_value_error(self) -> None:
-        """uptime 缺行是环境异常（ValueError→退出码 2 口径），不是 p_s 关闭。"""
+        """uptime 缺行属环境异常（ValueError，退出码 2），不是 performance_schema 关闭。"""
         from modou.patrol.unused_indexes import read_uptime
 
         with pytest.raises(ValueError, match="uptime"):

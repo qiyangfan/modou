@@ -1,9 +1,6 @@
-"""跨信号综合摘要（patrol summarize）：三份巡检报告的确定性 digest。
+"""确定性地汇总漂移、未用索引和慢日志报告，供跨信号分析使用。
 
-- 只做确定性聚合（计数、清单封顶），跨信号的语义关联留给 AI 叙事
-  （ai/lane_patrol，配置驱动）——digest 本身零网络、零 AI 依赖；
-- 输入必须是各自槽位对应的 report_kind（错位 = 输入错误），防张冠李戴；
-- 退出码取已加载信号的最严重档（drift 0/1；其余建议性输出恒 0）。
+校验每份报告的类型；摘要不调用 AI，退出码取输入报告中的最严重档。
 """
 
 from __future__ import annotations
@@ -23,7 +20,7 @@ _MAX_TOP = 3
 
 
 class SummaryInputError(Exception):
-    """输入文件不可读、缺信号或 report_kind 错位（映射退出码 2）。"""
+    """输入不可读、缺信号或 report_kind 错位，映射退出码 2。"""
 
 
 def summarize_reports(
@@ -33,12 +30,7 @@ def summarize_reports(
     *,
     inputs: dict[str, str | None] | None = None,
 ) -> dict:
-    """聚合三份巡检报告为一份综合摘要（report_kind=patrol_summary）。
-
-    输入形状强校验（非 dict / report_kind 错位 / exit_code 非整数 / 消费段形状
-    不符 → SummaryInputError，映射退出码 2）——畸形报告不得以裸异常或假「发现」
-    档收场（退出码契约：1=存在发现，2=输入错误）。
-    """
+    """聚合巡检报告；类型或字段形状错误时抛出 ``SummaryInputError``。"""
     loaded = {"drift": drift, "unused": unused, "slowlog": slowlog}
     if all(report is None for report in loaded.values()):
         raise SummaryInputError("at least one of --drift/--unused/--slowlog is required")
@@ -115,7 +107,7 @@ def summarize_reports(
         }
 
     exit_codes = [int(signal["exit_code"]) for signal in signals.values()]
-    # 退出码归一保留档位：2=任一输入报告带环境错误档，1=存在发现，0=无发现
+    # 取输入报告最严重档：2=有环境错误，1=有发现，0=无发现
     summary_exit = 2 if any(code >= 2 for code in exit_codes) else (1 if any(code >= 1 for code in exit_codes) else 0)
     return {
         "report_kind": "patrol_summary",
@@ -145,7 +137,7 @@ def _exit_code(report: dict, signal: str) -> int:
 
 
 def summarize_render(report: dict) -> str:
-    """人读文本：逐信号摘要行 + 退出码（观点区由 opinions 模块追加）。"""
+    """生成人读摘要；观点区由 opinions 模块追加。"""
     lines = ["墨斗综合巡检报告", "＝" * 40]
     signals = report.get("signals") or {}
     if "drift" in signals:

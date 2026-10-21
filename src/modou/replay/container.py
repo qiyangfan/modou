@@ -1,8 +1,4 @@
-"""影子库容器编排：经 podman/docker CLI 拉起一次性 MySQL 容器。
-
-选择 CLI 而非 testcontainers：零额外依赖（重依赖红线），podman/docker 命令面同构，
-本地与 CI 行为一致。容器仅监听 127.0.0.1 随机端口，root 口令随机生成，用后即焚。
-"""
+"""通过 podman/docker CLI 管理一次性 MySQL 影子容器，仅监听本机随机端口。"""
 
 from __future__ import annotations
 
@@ -61,7 +57,7 @@ class ShadowMySQL:
             shadow._resolve_port()
             shadow._wait_ready(startup_timeout)
         except Exception:
-            # 清理尽力而为：close 失败不得掩盖原始启动错误
+            # close 失败不得掩盖原始启动错误
             with contextlib.suppress(Exception):
                 shadow.close()
             raise
@@ -99,7 +95,7 @@ class ShadowMySQL:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=300,  # 首次拉取镜像可能远超容器启动本身
+                timeout=300,  # 镜像拉取可能耗时较长。
             )
         except subprocess.TimeoutExpired as exc:
             raise ContainerRuntimeError(f"container start timed out: {exc}") from exc
@@ -117,12 +113,11 @@ class ShadowMySQL:
                 timeout=30,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
-            # 与 _run_container 同款归一：容器 CLI 的异常不得裸穿破坏退出码契约
+            # 容器 CLI 异常统一收敛为 ContainerRuntimeError
             raise ContainerRuntimeError(f"cannot resolve container port: {exc}") from exc
         if result.returncode != 0 or not result.stdout.strip():
             raise ContainerRuntimeError(f"cannot resolve container port: {result.stderr.strip()}")
-        # 输出形如 "127.0.0.1:32768"（可能多行，取首行最后一列的端口）；畸形输出归一为
-        # ContainerRuntimeError，不得以 IndexError/ValueError 裸穿破坏退出码契约
+        # 输出形如 127.0.0.1:32768；只取首行，畸形输出收敛为 ContainerRuntimeError
         line = result.stdout.strip().splitlines()[0]
         try:
             self.port = int(line.rsplit(":", 1)[1])

@@ -1,7 +1,6 @@
-"""审核配置：modou.toml [lint] 段（规则开关 + 数值阈值）。
+"""lint 配置：modou.toml 的 [lint] 段（规则开关与数值阈值）。
 
-优先级（与口令口径一致，显式 > 配置文件）：命令行 --skip-rule 并入禁用集合；
-未提供配置文件 = 默认全开 + 默认阈值。
+命令行 --skip-rule 与配置 disable 取并集；未提供配置时默认全开并使用默认阈值。
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ class LintConfig:
 
 
 def _parse_threshold(raw: dict, key: str, path: Path) -> int:
-    """阈值解析：必须是正整数；浮点截断/负值/非数值一律 LintConfigError（退出码 2）。"""
+    """读取正整数阈值；布尔、非整浮点、负值和非数值都拒绝。"""
     value = raw.get(key, getattr(Thresholds, key))
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         raise LintConfigError(f"[lint].thresholds.{key} must be a positive integer in {path}")
@@ -42,7 +41,7 @@ def _parse_threshold(raw: dict, key: str, path: Path) -> int:
 
 
 def load_lint_config(config_path: Path | None = None) -> LintConfig:
-    """加载配置；config_path 显式给定时必须存在，否则找当前目录 modou.toml。"""
+    """加载配置；显式路径必须存在，否则读取当前目录的 modou.toml。"""
     path = config_path if config_path is not None else Path(DEFAULT_CONFIG_FILE)
     if not path.exists():
         if config_path is not None:

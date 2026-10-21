@@ -1,13 +1,4 @@
-"""评测回归门禁（v0.5 design §6）：提示词/模板/切片/规则注入的任何变更必跑评测。
-
-两层：
-- 确定性半区（恒跑）：数据集聚合性 + 上下文工程回归（残留面不丢语句、反例确实
-  规则零命中、提示词契约字符串在场）——任何一层坏掉，门禁即失败，零密钥可跑；
-- BYOK 半区（MOUDO_AI_* 三元组齐备才跑，镜像影子门禁模式）：真实端点逐案评审、
-  计精度、落盘 last-run.json、劣化即失败。首版精度实测于 2026-10-16
-  （qwen-plus @ DashScope：复跑 1.0，数字见 evals/README.md），
-  地板据此校准。
-"""
+"""AI 残留审核评测：始终检查确定性上下文；配置 BYOK 时评测真实端点精度。"""
 
 from __future__ import annotations
 
@@ -27,7 +18,6 @@ from modou.lint.engine import Thresholds, lint_sql_text, residual_statements
 EVAL_DIR = Path(__file__).resolve().parents[2] / "evals" / "lint_residual"
 CASES = json.loads((EVAL_DIR / "cases.json").read_text(encoding="utf-8"))["cases"]
 
-# 精度下限：2026-10-16 qwen-plus 首测校准（5 案各 0.2，容忍单案回归，两案劣化即阻塞）
 ACCURACY_FLOOR = 0.8
 
 
@@ -39,10 +29,10 @@ def _units(case: dict) -> list[StatementUnit]:
 
 
 class TestDatasetSanity:
-    """确定性半区：数据集与上下文工程回归（零密钥门禁）。"""
+    """检查数据集和上下文工程；无需 BYOK 配置。"""
 
     def test_positive_cases_are_fully_residual(self) -> None:
-        """正例语句必须全部进残留面：残留提取丢语句 = AI 漏审，门禁失败。"""
+        """正例语句必须全部进入残留面，否则视为 AI 漏审。"""
         for case in CASES:
             if case["expect"] != "positive":
                 continue
@@ -61,14 +51,14 @@ class TestDatasetSanity:
             assert not hits, f"{case['id']}: 反例被规则命中（不是无害样本）: {hits}"
 
     def test_lane_prompts_carry_output_contract(self) -> None:
-        """提示词是评测资产：结构化输出契约与中文观点约束的字符串必须在场（三车道同律）。"""
+        """提示词是评测资产：结构化输出与中文观点约束必须在场。"""
         for prompt in (lane_lint._SYSTEM_PROMPT, lane_verify._SYSTEM_PROMPT, lane_patrol._SYSTEM_PROMPT):
             assert "JSON array" in prompt
             assert "Chinese" in prompt
 
 
 class TestByokEvaluation:
-    """BYOK 半区：真实端点精度门（三元组齐备才跑；未配置 skip，不假绿）。"""
+    """真实端点精度门：三元组齐备才跑，未配置时 skip。"""
 
     @pytest.fixture()
     def byok_config(self) -> AiConfig:
@@ -83,8 +73,7 @@ class TestByokEvaluation:
         correct = 0
         for case in CASES:
             opinions = review_residual(_units(case), [], byok_config)
-            # 只有 status=ok 的观点算作命中；degraded 是评审通道故障，
-            # 按失败计（README「评审整体降级阻塞合入」），不得伪装成精度数字。
+            # 只有 status=ok 的观点计入结果；degraded 按失败处理。
             flagged = any(item.status == "ok" for item in opinions)
             degraded_hit = any(item.status != "ok" for item in opinions)
             expected = case["expect"] == "positive"

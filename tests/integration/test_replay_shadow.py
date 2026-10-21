@@ -115,7 +115,7 @@ def test_replay_delimiter_block_creates_procedure(mysql_conn: pymysql.connection
 
 
 def test_replay_session_database_via_use(mysql_conn: pymysql.connections.Connection, tmp_path: Path) -> None:
-    """变更集内 USE 切库：跨库语句按声明落库（多库默认，ADR-0008）。"""
+    """变更集内的 USE 切换默认库，后续语句按声明执行。"""
     db0, db1 = unique_db("modou_a"), unique_db("modou_b")
     with mysql_conn.cursor() as cursor:
         cursor.execute(f"CREATE DATABASE {db0}")

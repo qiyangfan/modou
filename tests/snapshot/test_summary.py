@@ -1,4 +1,4 @@
-"""快照摘要（证据原语）测试：委托面与 CLI 机读出口共用的单一事实源。"""
+"""快照摘要测试：MCP 与 CLI 共用同一份输出。"""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ class TestSnapshotSummary:
         assert detail == {"table": "orders", "columns": 2, "indexes": 0, "sampled_rows": 2}
 
     def test_metadata_only_no_sample_rows_leaked(self) -> None:
-        """证据原语只承载元数据：采样数据行绝不进摘要（数据不出本地）。"""
+        """摘要只含元数据，采样数据行不得出现。"""
         import json
 
         text = json.dumps(snapshot_summary(_snapshot()), ensure_ascii=False)

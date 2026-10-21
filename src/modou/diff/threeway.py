@@ -1,13 +1,7 @@
-"""三方结构化 diff：基线 B（执行前）、期望 E（基线+回放）、实际 A（执行后）对比。
+"""比较基线 B、回放期望态 E 和执行后实际态 A，按结构字段维度生成结论。
 
-分类在「维度」粒度进行、按类别聚合成结论（对象 × 类别 一条）：
-- E == A：该维度本次变更正确落地，无结论；
-- E != A 且 B == A：线上停在该维度的基线态，变更未生效 → 漏执行；
-- E != A 且 B == E：变更集未触碰的维度，线上却与基线不同 → 历史漂移（他人并行改动）；
-- 其余（A 同时异于 B 与 E）：执行了但结果不对 → 错执行。
-
-一个对象多个维度可产生不同类别（如索引漏执行、列定义错执行），各自成条。
-比较用结构化字段而非 DDL 原文，杜绝格式化假差异（ADR-0004 同源）。
+E=A 为一致；E≠A 且 B=A 为漏执行；E≠A 且 B=E 为历史漂移；其他情况为错执行。
+各结构化维度分别判定，再按对象和类别聚合。
 """
 
 from __future__ import annotations
@@ -32,8 +26,7 @@ KIND_DRIFT = "historical_drift"
 
 
 class DiffInvariantError(Exception):
-    """三方分类的内部不变量被破坏（E==A 时调用 classify 等）：属编程错误，
-    必须响亮穿透而非被管线的环境异常网收敛为退出码 2。"""
+    """三方分类的内部不变量被破坏，属编程错误，必须向上抛出。"""
 
 
 MISSING_MARKER = "<missing>"
@@ -107,11 +100,10 @@ def three_way_diff(
                     a_objects.get(name),
                 )
             )
-    # 库级元信息（默认字符集/collation）：与其余维度同口径，期望≠实际才产出结论。
-    # 守卫若误用 B≠A，合法落地（E==A）会在 _classify 处崩溃、漏执行（B==A）会漏报
+    # 库级字符集/排序规则：只在期望与实际不同时产出结论；不能改用 B≠A 作为守卫
     baseline_state = (baseline.charset, baseline.collation) if baseline else None
     if expected and actual and (expected.charset, expected.collation) != (actual.charset, actual.collation):
-        # charset 与 collation 同时漂移时各自成一个维度条目，不折叠进单一标签
+        # 字符集与排序规则各自成维度，不合并
         sides = [
             side
             for side, e_value, a_value in (
@@ -157,7 +149,7 @@ def _diff_object(
     e_obj: object | None,
     a_obj: object | None,
 ) -> list[ObjectConclusion]:
-    """单对象：逐维度分类，按类别聚合为 0~3 条结论。"""
+    """按维度分类单个对象，按类别聚合为 0~3 条结论。"""
     if object_type == "table":
         dimension_findings = _table_dimension_findings(b_obj, e_obj, a_obj)  # type: ignore[arg-type]
     else:
@@ -172,7 +164,7 @@ def _diff_object(
         if dimension not in conclusion.dimensions:
             conclusion.dimensions.append(dimension)
         conclusion.details.extend(details)
-    # 输出顺序稳定：漏执行 → 错执行 → 历史漂移
+    # 固定输出顺序：漏执行、错执行、历史漂移
     return [by_kind[kind] for kind in (KIND_MISSING, KIND_WRONG, KIND_DRIFT) if kind in by_kind]
 
 
@@ -191,12 +183,12 @@ def _table_dimension_findings(
     e_table: TableDef | None,
     a_table: TableDef | None,
 ) -> list[tuple[str, str, list[DimensionDiff]]]:
-    """表的维度级判定：存在性 → 列/索引/外键/检查约束 → 表选项。"""
+    """判定表的存在性、列/索引/外键/检查约束与表选项。"""
     findings: list[tuple[str, str, list[DimensionDiff]]] = []
 
     if e_table is None or a_table is None:
         if e_table is None and a_table is None:
-            # 变更集要求删除、实际也已删除（或两侧皆无）：本次变更已正确落地，无结论
+            # 删除符合期望，不产出结论。
             return findings
         findings.append(
             (
@@ -215,7 +207,7 @@ def _table_dimension_findings(
         return findings
 
     dimension_specs: list[tuple[str, dict, dict, dict, object]] = []
-    # (维度名, b_state, e_state, a_state, 渲染函数)；state 为「条目名 → 定义」映射
+    # (维度名, B/E/A 状态, 渲染函数)；state 为「条目名 → 定义」
     dimension_specs.append(
         (
             "columns",
@@ -253,8 +245,7 @@ def _table_dimension_findings(
         )
     )  # type: ignore[arg-type]
 
-    # 维度内逐「条目」分类：E→A 的每处差异，按该条目在 B 中的状态归因。
-    # 整维度状态比较会把「建表后漏加一列」误判为错执行（基线无此表 → 列集全不同）。
+    # 逐条目比较 E→A，并按该条目在 B 中的状态归因；整维度比较会把「建表后漏加一列」误判为错执行
     for dimension, b_state, e_state, a_state, render in dimension_specs:
         for kind, detail in _classify_items(dimension, b_state, e_state, a_state, render):
             findings.append((kind, dimension, [detail]))
@@ -262,8 +253,8 @@ def _table_dimension_findings(
     options_e = (e_table.engine, e_table.collation, e_table.comment, e_table.create_options)
     options_a = (a_table.engine, a_table.collation, a_table.comment, a_table.create_options)
     if options_e != options_a:
-        # 基线无此表（新建场景）时以 None 参与分类：E≠A 且 A 异于「不存在」→ 错执行
-        # （如运维以 latin1 客户端执行含中文注释的变更集，注释被双重编码固化）
+        # 基线无此表时以 None 参与分类，避免把新建表的选项差异误判；
+        # 例如 latin1 客户端可能导致中文注释被双重编码
         options_b = (b_table.engine, b_table.collation, b_table.comment, b_table.create_options) if b_table else None
         findings.append(
             (
@@ -290,7 +281,7 @@ def _definition_dimension_findings(
     """视图/过程/函数/触发器/事件：存在性 + 定义两个维度。"""
     if e_obj is None or a_obj is None:
         if e_obj is None and a_obj is None:
-            # 变更集要求删除、实际也已删除：本次变更已正确落地，无结论
+            # 删除符合期望，不产出结论。
             return []
         return [
             (
@@ -363,8 +354,7 @@ def _render_table_options(options: tuple) -> str:
 
 
 def _render_column(column: ColumnDef) -> str:
-    # 不变量：凡是参与条目相等性比较的字段（ColumnDef 除 name 外全部）都必须出现在
-    # 渲染文本里——collation/comment 缺席时两侧渲染同文，读者无法理解差异何在。
+    # 参与相等性比较的字段都必须出现在渲染文本中；缺 collation/comment 时两侧文本相同，读者看不出差异
     nullability = "NULL" if column.nullable else "NOT NULL"
     default = f" default={column.default!r}" if column.default is not None else ""
     extra = f" extra={column.extra}" if column.extra else ""
@@ -387,7 +377,7 @@ def _render_index_part(part: IndexPart) -> str:
         text = f"{part.column}({part.sub_part})"
     else:
         text = part.column
-    # DESC 方向是结构的一部分，缺了它两侧渲染相同、读者无法理解差异何在
+    # 降序方向是结构的一部分，缺省时两侧渲染相同
     return f"{text} {part.direction}" if part.direction == "D" else text
 
 
@@ -400,5 +390,5 @@ def _render_check(check: CheckDef) -> str:
 
 
 def _compact_ddl(ddl: str) -> str:
-    """DDL 压缩为单行摘要（完整原文以文件形式随报告输出时再展开）。"""
+    """把 DDL 压缩为单行摘要。"""
     return " ".join(ddl.split())

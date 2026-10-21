@@ -23,7 +23,7 @@ class TestValidateInputs:
             validate_inputs(["SELECT * FROM orders WHERE user_id = 1"], make_snapshot(with_sample=False))
 
     def test_v1_snapshot_rejected(self) -> None:
-        # v1 快照无采样数据节：实证无从谈起，以输入错误拒绝并指引重采
+        # v1 快照无采样数据，按输入错误拒绝并提示重采
         with pytest.raises(OptimizeInputError, match="sample"):
             validate_inputs(["SELECT * FROM orders WHERE user_id = 1"], make_snapshot(format_version=1))
 
@@ -184,7 +184,7 @@ class TestTwoStateInvariant:
 
 class TestReferencedTableValidation:
     def test_statement_referencing_missing_table_rejected(self) -> None:
-        # 快照缺表时快速失败（退出码 2 语义），不在影子阶段才炸掉整跑
+        # 快照缺表时提前失败（退出码 2），不要等到影子阶段才失败
         with pytest.raises(OptimizeInputError, match="ghost"):
             validate_inputs(
                 ["SELECT * FROM orders o JOIN ghost g ON o.user_id = g.id"],
@@ -213,7 +213,7 @@ class TestAdvisorDroppedAttribution:
 
 class TestAdvisorExplainFactsWiring:
     def test_measure_statement_passes_baseline_plan_facts(self, monkeypatch) -> None:
-        """事实预取打包：管线把基线 EXPLAIN 事实传给候选生成（受控多轮的确定性半区）。"""
+        """管线把基线 EXPLAIN 事实传给候选生成。"""
 
         import modou.optimize.pipeline as pipeline_module
         from modou.optimize.candidates import analyze_statement

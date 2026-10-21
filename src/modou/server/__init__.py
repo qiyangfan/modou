@@ -1,14 +1,6 @@
-"""MCP 表面：与 CLI 分析类子命令 1:1 映射的薄封装（ADR-0002）。
+"""把 CLI 分析命令映射为本地 stdio MCP 工具。
 
-红线落地：
-- 零业务逻辑：工具函数只做「参数收窄 → 内核调用 → 结果/错误翻译」，任何业务
-  逻辑落在内核库；
-- 仅本地 stdio：客户端按需拉起子进程，无端口监听、无常驻、无鉴权；
-- 描述与 CLI help 同源（surface_map 提供映射与文案，parity 测试守护漂移）；
-- 内核异常翻译为英文工具错误，mask_error_details 遮蔽其余异常细节（防堆栈与
-  内部路径泄漏）。
-
-依赖为可选 extra（fastmcp）：未安装时 `modou mcp` 在 CLI 侧报安装指引（退出码 2）。
+工具描述与 CLI help 同源；意外异常屏蔽内部细节。fastmcp 为可选依赖。
 """
 
 from __future__ import annotations
@@ -52,7 +44,7 @@ def build_mcp_server() -> FastMCP:
 
 
 def _register_tools(mcp: FastMCP) -> None:
-    # 工具参数默认值在定义期求值：常量须在工具定义前绑定（不能放函数体内局部导入）
+    # 工具参数默认值在定义期求值，常量必须在定义前导入
     from modou.patrol.unused_indexes import DEFAULT_OBSERVE_DAYS
 
     command_help = cli_command_map()
@@ -135,7 +127,7 @@ def _register_tools(mcp: FastMCP) -> None:
             )
         except VerifyInputError as exc:
             raise ToolError(f"changeset validation failed: {'; '.join(exc.errors)}") from exc
-        # AI 失败归因与 CLI 同车道：未配置零网络；观点只进报告（退出码免疫）
+        # AI 归因可选：未配置不联网，观点不影响退出码
         import os
 
         from modou.report.opinions import attach_ai_opinions
@@ -153,7 +145,7 @@ def _register_tools(mcp: FastMCP) -> None:
                 default_database=default_database,
                 allow_legacy_names=allow_legacy_names,
             )
-        # 结论性输出：报告与退出码是数据（agent 据此判断结论档位），不转工具错误
+        # 报告与退出码是结论数据，不转成工具错误
         return {"exit_code": outcome.exit_code, "report": attach_ai_opinions(outcome.report_json, opinions)}
 
     @mcp.tool(
@@ -185,7 +177,7 @@ def _register_tools(mcp: FastMCP) -> None:
             raise ToolError(f"snapshot capture failed: {exc}") from exc
         from modou.snapshot.summary import snapshot_summary
 
-        # 证据原语（ADR-0009）：summary 与 CLI --report-json 同源（snapshot_summary 单源）
+        # summary 与 CLI --report-json 使用同一内核输出。
         return {"exit_code": 0, "output": str(output), "summary": snapshot_summary(snapshot)}
 
     @mcp.tool(
@@ -242,18 +234,18 @@ def _register_tools(mcp: FastMCP) -> None:
         except LintConfigError as exc:
             raise ToolError(f"lint config error: {exc}") from exc
         disabled = set(lint_config.disabled) | set(skip_rule or [])
-        # PARSE.001 是引擎产出的工具命中（非规则清单成员），同属可跳过对象；与 CLI 同语义
+        # PARSE.001 不在规则清单中，但同样可跳过
         known_rule_ids = {rule.rule_id for rule in RULES} | {PARSE_RULE_ID}
         unknown_rules = sorted(disabled - known_rule_ids)
         if unknown_rules:
-            # 与 CLI 同语义：拼错的规则 id 必须拒绝，静默并入会改变审核结论口径
+            # 拼错的规则 id 必须拒绝，静默忽略会改变审核结果
             raise ToolError(f"lint failed: unknown rule id(s) in skip/disable: {', '.join(unknown_rules)}")
         try:
             result = lint_paths([Path(p) for p in paths], RULES, thresholds=lint_config.thresholds, disabled=disabled)
         except (OSError, UnicodeDecodeError) as exc:
             raise ToolError(f"lint failed: {exc}") from exc
 
-        # AI 残留评审与 CLI 同车道：未配置零网络；观点只进报告（退出码免疫）
+        # AI 残留评审可选：未配置不联网，观点不影响退出码
         ai_config = config_from_env(dict(os.environ))
         opinions: list[AiOpinion] = []
         if ai_config is not None:
@@ -333,7 +325,7 @@ def _register_tools(mcp: FastMCP) -> None:
         )
 
         if observe_days < 1:
-            # 与 CLI min=1 同语义：0 天观察窗会让「确认未用」判定失去门槛
+            # 0 天观察窗会让「确认未用」失去门槛
             raise ToolError("observe_days must be >= 1")
 
         usages: list = []
@@ -348,7 +340,7 @@ def _register_tools(mcp: FastMCP) -> None:
             except (PasswordUnavailableError, ValueError) as exc:
                 raise ToolError(str(exc)) from exc
             except Exception as exc:
-                # 建连失败（拒连/超时等）必须翻译为工具错误，否则被 mask 成无信息文案
+                # 建连失败必须转成工具错误，否则会被 mask 成无信息文案
                 raise ToolError(f"unused-indexes failed: {exc}") from exc
             try:
                 for db_name in dict.fromkeys(database):

@@ -1,6 +1,6 @@
 """MCP 工具封装测试：pack/version 正路径、错误翻译（无堆栈泄漏）、stdio 无端口。
 
-容器依赖路径（verify/optimize）在影子集成测试覆盖（test_demo_flow.py）。
+容器依赖路径（verify/optimize）由 test_demo_flow.py 覆盖。
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ class TestVersionTool:
 
 class TestSnapshotCaptureTool:
     def test_missing_password_is_tool_error_not_hang(self, tmp_path, monkeypatch) -> None:
-        """stdio 面禁止交互提示：口令缺失必须立即报工具错误（而非挂起等待输入）。"""
+        """stdio 模式不允许交互提示：缺口令应立即报错，不能挂起等待输入。"""
         monkeypatch.delenv("MOUDO_MYSQL_PASSWORD", raising=False)
         message = call_expect_error(
             _server(),
@@ -114,7 +114,7 @@ class TestSnapshotCaptureTool:
 
 class TestStdioOnly:
     def test_server_process_opens_no_listening_socket(self) -> None:
-        """构建并列举工具（等价于 server 已在进程内运行）：不得出现任何监听套接字。"""
+        """构建并列举工具时不得出现监听套接字。"""
         import asyncio
         import shutil
 
@@ -155,7 +155,7 @@ def _listening_ports() -> set[str]:
 
 class TestReviewRegressions:
     def test_lint_unknown_skip_rule_is_tool_error(self, tmp_path) -> None:
-        """与 CLI 同语义：拼错的规则 id 拒绝，静默并入会改变审核结论口径。"""
+        """拼错的规则 id 必须拒绝，静默忽略会改变审核结果。"""
         target = tmp_path / "a.sql"
         target.write_text("SELECT * FROM t WHERE a LIKE '%x'\n", encoding="utf-8")
         message = call_expect_error(_server(), "lint", {"paths": [str(target)], "skip_rule": ["TOTALLY_UNKNOWN_RULE"]})
@@ -171,10 +171,10 @@ class TestReviewRegressions:
 
 
 class TestEvidenceAlignment:
-    """证据原语与命令机读出口的一致性校验（spec ai-analyst「宿主委托面」）。"""
+    """检查证据原语与命令机读报告的一致性。"""
 
     def test_snapshot_capture_summary_is_kernel_summary(self, tmp_path, monkeypatch) -> None:
-        """快照摘要单一事实源：MCP 工具出口 == 内核 snapshot_summary（CLI --report-json 同源）。"""
+        """快照摘要来自同一个内核输出：MCP 与 CLI 一致。"""
         from modou.snapshot.model import DatabaseInventory, Snapshot, SnapshotMeta
         from modou.snapshot.summary import snapshot_summary
 
@@ -199,7 +199,7 @@ class TestEvidenceAlignment:
         assert result.data["summary"] == snapshot_summary(captured)
 
     def test_lint_machine_exit_matches_cli_report(self, tmp_path) -> None:
-        """lint 命中：MCP 工具的 report 与 CLI --report-json 同源同构。"""
+        """lint 的 MCP report 与 CLI --report-json 输出一致。"""
         import json
 
         from typer.testing import CliRunner
@@ -216,7 +216,7 @@ class TestEvidenceAlignment:
         assert tool.data["report"] == json.loads(report_file.read_text(encoding="utf-8"))
 
     def test_lint_ai_opinions_flow_through_tool(self, tmp_path, monkeypatch) -> None:
-        """MCP lint 与 CLI 同车道：配置后观点进 report，退出码不受影响。"""
+        """MCP lint：配置后观点进 report，退出码不受影响。"""
         from modou.report.opinions import AiOpinion
 
         monkeypatch.setenv("MOUDO_AI_BASE_URL", "https://api.example.com/v1")
@@ -235,7 +235,7 @@ class TestEvidenceAlignment:
         assert result.data["report"]["ai_opinions"][0]["subject"] == "a.sql:1"
 
     def test_verify_ai_opinions_flow_through_tool(self, tmp_path, monkeypatch) -> None:
-        """MCP verify 与 CLI 同车道：配置后归因观点进 report，退出码不受影响。"""
+        """MCP verify：配置后归因观点进 report，退出码不受影响。"""
         from modou.report.opinions import AiOpinion
 
         monkeypatch.setenv("MOUDO_AI_BASE_URL", "https://api.example.com/v1")

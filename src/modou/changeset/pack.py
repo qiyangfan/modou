@@ -1,7 +1,6 @@
-"""pack 打包：按序合并为单文件 + 破坏性预警 + 大表锁风险标注。
+"""按序合并变更集，并附带破坏性预警与大表锁风险标注。
 
-预警属「非结论」输出（ADR-0004）：sqlglot 解析仅服务于预警；解析失败降级为
-unparseable 提示而非错误，绝不因解析失败阻塞打包。
+预警不构成验收结论；解析失败只产生 unparseable 提示，不阻塞打包。
 """
 
 from __future__ import annotations
@@ -50,7 +49,7 @@ def pack_changeset(
     allow_legacy_names: bool = False,
     target_major: str = "8.0",
 ) -> PackResult:
-    """发现 → 校验 → 按序合并 → 逐语句预警。校验失败抛 ChangesetValidationError。"""
+    """发现、校验并按序合并变更集，逐语句产出预警；校验失败抛 ChangesetValidationError。"""
     if target_major not in SUPPORTED_TARGET_MAJORS:
         raise ValueError(f"unsupported target major: {target_major} (supported: {SUPPORTED_TARGET_MAJORS})")
     discovery = discover_changeset(directory, allow_legacy_names=allow_legacy_names)
@@ -60,16 +59,15 @@ def pack_changeset(
     chunks: list[str] = []
     warnings: list[StatementWarning] = []
     global_index = 0
-    merged = ""  # 逐文件累加的合并产物，用于校验语句边界不因合并而漂移
+    merged = ""  # 逐文件累加产物，用于校验合并后语句边界不漂移
     expected_total = 0
-    # 粘连根因是「最后一个产出过语句的文件」末条缺分隔符：中间插入的空文件不产出语句，
-    # 归因到它会把根因指错对象
+    # 粘连归因到最近一个有语句的文件，空文件不是根因。
     last_nonempty_item: ChangeFile | None = None
     for item in discovery.items:
         try:
             content = item.path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
-            # 不可读（权限）或非 UTF-8 编码（如 GBK）按校验错误处理，收敛到确定性退出码
+            # 文件不可读或非 UTF-8 时按校验错误报告。
             raise ChangesetValidationError([f"cannot read {item.filename}: {exc}"]) from exc
         chunks.append(f"-- ===== {item.filename} =====\n{content.rstrip()}\n")
         warnings.extend(_analyze_file(item, content, start_index=global_index + 1, target_major=target_major))
@@ -77,9 +75,8 @@ def pack_changeset(
         global_index += file_count
         expected_total += file_count
         merged = "".join(chunks)
-        # 单文件各自切分数之和 ≠ 合并后切分数 ⇒ 语句边界因合并而粘连：
-        # 预警序号与回放序号将错位（漏执行指认会指错对象）。粘连在拼入当前文件时
-        # 暴露，但根因几乎总是前一个非空文件末条语句缺分隔符（或 DELIMITER 未复位）
+        # 语句数变化说明文件边界粘连，预警序号会与回放序号错位；
+        # 通常因前一文件缺分隔符或 DELIMITER 未复位。
         if len(split_statements(merged)) != expected_total:
             culprit = last_nonempty_item.filename if last_nonempty_item is not None else item.filename
             raise ChangesetValidationError(
@@ -89,9 +86,7 @@ def pack_changeset(
                     "append ';' / 'DELIMITER ;' to its last statement"
                 ]
             )
-        # 语句切分数守卫存在盲区：前文件把 DELIMITER 留到 EOF、后文件的语句数恰好
-        # 补平时切分数不变。DELIMITER 感知客户端会跨文件粘连，逐文件预警序号也错位，
-        # 因此额外强制「每个文件结束时分隔符已复位为默认」
+        # 后续文件可能抵消总数变化，因此仍逐文件检查 DELIMITER 是否复位。
         if final_delimiter(content) != ";":
             raise ChangesetValidationError(
                 [
@@ -102,7 +97,7 @@ def pack_changeset(
         if file_count > 0:
             last_nonempty_item = item
 
-    # 非阻塞级发现警告（跳号/legacy）并入预警输出
+    # 跳号/legacy 等非阻塞提示并入预警输出
     warnings.extend(_discovery_warnings(discovery))
     packed_sql = _provenance_header(directory, discovery, warnings, global_index) + "".join(chunks)
     return PackResult(packed_sql=packed_sql, warnings=warnings, discovery=discovery)
@@ -114,7 +109,7 @@ def _provenance_header(
     warnings: list[StatementWarning],
     statement_count: int,
 ) -> str:
-    """打包产物的出处头：交付给运维的 SQL 必须能自证来源与口径（变更集目录才是事实源）。"""
+    """生成产物出处头；变更集目录是事实源，合并文件只是派生物。"""
     destructive = sum(1 for w in warnings if w.kind == "destructive")
     lock_risk = sum(1 for w in warnings if w.kind == "lock_risk")
     unparseable = sum(1 for w in warnings if w.kind == "unparseable")
@@ -210,7 +205,7 @@ def _analyze_statement(source_file: str, index: int, statement: str, target_majo
 
 
 def _analyze_alter(source_file: str, index: int, node: exp.Alter, target_major: str) -> list[StatementWarning]:
-    """按操作类型给锁风险标注：算法口径随目标大版本变化（5.7 无 INSTANT）。"""
+    """按操作类型标注锁风险；算法随目标大版本变化，5.7 无 INSTANT。"""
     warnings: list[StatementWarning] = []
     actions = node.args.get("actions") or []
     table_name = node.this.sql(dialect="mysql") if node.this is not None else "?"
@@ -227,7 +222,7 @@ def _analyze_alter(source_file: str, index: int, node: exp.Alter, target_major: 
                 message=f"ALTER {table_name}：{note}",
             )
         )
-    # 引擎/字符集整体转换走 options 通道（非 actions）
+    # 引擎/字符集整体转换在 options 中，不在 actions
     if node.args.get("options"):
         warnings.append(
             StatementWarning(
@@ -271,8 +266,7 @@ def _alter_note(action: exp.Expression, target_major: str) -> str | None:
 def _discovery_warnings(discovery: DiscoveryResult) -> list[StatementWarning]:
     warnings: list[StatementWarning] = []
     for message in discovery.warnings:
-        # 发现器产出的警告有两类来源：序号跳号（sequence gap 前缀）与其余目录提示
-        # （legacy 收录、子目录 .sql），按前缀分流，避免张冠李戴
+        # 按 sequence gap 前缀区分跳号与目录提示，避免归错类别
         text = f"变更集序号跳号：{message}" if message.startswith("sequence gap") else f"变更集目录提示：{message}"
         warnings.append(
             StatementWarning(

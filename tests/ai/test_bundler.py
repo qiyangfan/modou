@@ -1,4 +1,4 @@
-"""变更分包器测试（design §4：按库/语句组分包，并发单轮聚合的确定性前提）。"""
+"""变更分包器测试：验证按库分组和预算装箱的确定性。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ class TestBundleUnits:
         batches = bundle_units(units, max_statements=10, max_chars=100000)
         dbs_per_batch = [{u.database for u in batch} for batch in batches]
         assert all(len(dbs) == 1 for dbs in dbs_per_batch)
-        # 组顺序 = 库首次出现序
+        # 组顺序按库首次出现的顺序
         assert [next(iter(dbs)) for dbs in dbs_per_batch] == ["a", "b", None]
 
     def test_respects_max_statements(self) -> None:

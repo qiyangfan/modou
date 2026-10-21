@@ -1,12 +1,6 @@
-"""审核引擎：纯静态规则判定（AST），不连库、不启容器、不联网（宪法与 spec 同源）。
+"""纯静态 SQL 审核引擎：不连库、不启容器、不联网。
 
-- 语句切分复用回放切分器（DELIMITER 感知，ADR-0004 同源：边界结论不依赖解析）；
-- 行号定位用「空白不敏感的顺序扫描」：切分器保留语句内注释，直接 find 会因
-  空白差异失配，归一化后顺序锚定既稳健又确定性；
-- 解析失败逐语句记录为工具命中（PARSE.001，指认文件与行号、计入汇总与退出码），
-  其余语句照常审核，整轮不中断；非静默——可经既有跳过机制显式关闭
-  （spec 2026-10-15 修订：真实迁移链存在解析器不支持但合法的语法形态，
-  如版本条件注释与存储过程体，整体中止会把局部解析缺口放大成零审计覆盖）。
+解析失败的语句记为 PARSE.001，其他语句继续审核；语句切分复用回放切分器。
 """
 
 from __future__ import annotations
@@ -25,15 +19,14 @@ LEVEL_ERROR = "error"
 LEVEL_WARNING = "warning"
 LEVEL_INFO = "info"
 
-# 工具命中：语句无法解析（解析器不支持该语法形态）。非 SOAR 规则，但占用同一
-# 命中通道与跳过机制，保证「覆盖缺口」对调用方可见且可治理。
+# 工具命中：语句无法解析。它不是规则，但走同一命中与跳过机制，让覆盖缺口可见。
 PARSE_RULE_ID = "PARSE.001"
 PARSE_SUGGESTION = "人工复核该语句的影响；确认无需机器审核后可用 --skip-rule PARSE.001 关闭此类提示。"
 
 
 @dataclass(frozen=True)
 class Thresholds:
-    """数值阈值（宪法口径：可配置，未配置用默认值）。"""
+    """规则数值阈值，可由配置文件覆盖。"""
 
     in_list: int = 100
     offset: int = 10000
@@ -52,7 +45,7 @@ class Hit:
 
 @dataclass(frozen=True)
 class Rule:
-    """单条规则：标识 + 级别 + 说明 + 判定函数（AST 节点访问，返回消息清单）。"""
+    """一条规则：标识、级别、说明与判定函数。"""
 
     rule_id: str
     level: str
@@ -63,7 +56,7 @@ class Rule:
 
 @dataclass
 class ResidualStatement:
-    """残留语句：解析成功且规则零命中（AI 残留评审的输入面，与 hits 同趟产出）。"""
+    """解析成功且规则零命中的语句，与 hits 同趟产出。"""
 
     file: str
     line: int
@@ -89,10 +82,7 @@ def lint_paths(
     thresholds: Thresholds | None = None,
     disabled: set[str] | None = None,
 ) -> LintResult:
-    """对文件/目录/变更集目录清单执行审核（目录递归收集 .sql 文件，输入路径去重）。
-
-    单趟产出命中与残留面（评审 AI 的输入与规则判定同源，无二次读文件/二次判定）。
-    """
+    """审核文件或目录（路径去重），单趟产出命中与残留语句。"""
     resolved = thresholds or Thresholds()
     disabled_rules = disabled or set()
     result = LintResult()
@@ -116,7 +106,7 @@ def lint_sql_text(
     thresholds: Thresholds | None = None,
     disabled: set[str] | None = None,
 ) -> list[Hit]:
-    """审核单文件文本：切分 → 行号定位 → 解析 → 规则判定。"""
+    """审核一段 SQL 文本并返回命中。"""
     resolved = thresholds or Thresholds()
     disabled_rules = disabled or set()
     hits, _ = _lint_file(text, filename, rules, resolved, disabled_rules)
@@ -130,11 +120,7 @@ def residual_statements(
     thresholds: Thresholds | None = None,
     disabled: set[str] | None = None,
 ) -> list[tuple[int, str]]:
-    """AI 残留评审的输入面：解析成功且规则零命中的语句（[(行号, 语句文本)]）。
-
-    规则覆盖不到的残留即 AI 分析师的职责面；不可解析语句不进残留
-    （机器无法判定其语义，已由 PARSE.001 披露覆盖缺口）。
-    """
+    """返回解析成功且未命中规则的语句，供 AI 分析；解析失败由 PARSE.001 披露。"""
     resolved = thresholds or Thresholds()
     disabled_rules = disabled or set()
     _, residuals = _lint_file(text, "", rules, resolved, disabled_rules)
@@ -148,7 +134,7 @@ def _lint_file(
     thresholds: Thresholds,
     disabled_rules: set[str],
 ) -> tuple[list[Hit], list[tuple[int, str]]]:
-    """单文件单趟判定：命中与残留面同源产出（评审 AI 不重读文件、不重跑规则）。"""
+    """单文件单趟判定，同时产出命中与残留语句。"""
     statements = split_statements(text)
     if not statements:
         return [], []
@@ -174,12 +160,11 @@ def _judge_statement(
     thresholds: Thresholds,
     disabled_rules: set[str],
 ) -> tuple[list[tuple[Rule, str]], bool, str | None]:
-    """单语句判定核心（lint_sql_text 与 residual_statements 共用）：
-    返回（(规则, 消息) 清单, 是否解析成功, 解析错误首行）。"""
+    """判定单条语句，返回命中、解析状态和解析错误首行。"""
     try:
         tree = sqlglot.parse_one(statement, read="mysql", error_level=sqlglot.ErrorLevel.RAISE)
     except (sqlglot.errors.ParseError, sqlglot.errors.TokenError) as exc:
-        # splitlines 对空消息返回空列表（旧 split("\n") 实现不会因此崩），兜底保住旧行为
+        # 空消息没有首行，返回空字符串。
         return [], False, (str(exc).splitlines() or [""])[0]
     if tree is None:
         return [], True, None
@@ -219,10 +204,7 @@ def _hits_from_findings(findings: list[tuple[Rule, str]], filename: str, line: i
 
 
 def _collect_sql_files(paths: list[Path]) -> list[Path]:
-    """文件直接收；目录递归收集 .sql（变更集目录 = 目录扫描，不做 manifest 校验）。
-
-    按 resolve 后的绝对路径去重：同一文件经目录与显式路径重复给出时只审一次。
-    """
+    """收集文件和目录中的 .sql 文件，并按解析后的绝对路径去重。"""
     files: list[Path] = []
     seen: set[Path] = set()
     for path in paths:
@@ -237,7 +219,7 @@ def _collect_sql_files(paths: list[Path]) -> list[Path]:
 
 
 def _statement_start_lines(text: str, statements: list[str]) -> list[int]:
-    """每条语句在文件中的起始行：空白不敏感顺序扫描（见模块注释）。"""
+    """按空白不敏感的顺序扫描，定位每条语句的起始行。"""
     positions: list[int] = []
     norm_chars: list[str] = []
     norm_positions: list[int] = []
@@ -258,7 +240,7 @@ def _statement_start_lines(text: str, statements: list[str]) -> list[int]:
             continue
         found = joined.find(needle, cursor)
         if found < 0:
-            # 理论不可达（语句文本必然来自本文件切分）；防御性兜底为上一位置
+            # 理论不可达：语句来自本文件切分；兜底为上一位置
             positions.append(line_of(norm_positions[cursor]) if cursor < len(norm_positions) else 1)
             continue
         positions.append(line_of(norm_positions[found]))
@@ -267,7 +249,7 @@ def _statement_start_lines(text: str, statements: list[str]) -> list[int]:
 
 
 def render_text(result: LintResult) -> str:
-    """人读文本（中文正文）：逐命中列规则、级别、位置与建议。"""
+    """生成中文人读报告，逐条列出命中与建议。"""
     lines: list[str] = ["墨斗审核报告", "＝" * 40]
     if not result.hits:
         lines.append("无命中：输入未触发任何已启用规则。")

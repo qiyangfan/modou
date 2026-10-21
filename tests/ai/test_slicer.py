@@ -1,4 +1,4 @@
-"""schema 切片器测试（spec ai-analyst「证据预取的受控调用」：上下文按触达裁剪）。"""
+"""schema 切片器测试：验证上下文按语句触达范围裁剪。"""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ class TestTouchedObjects:
         assert touched.databases == {"shop"}
 
     def test_unparseable_statement_reports_not_usable(self) -> None:
-        # 残缺结构（未闭合引号）才触发解析错误；sqlglot 对乱码宽容（解析成标识符）
+        # 只有残缺结构才抛解析错误；sqlglot 会把乱码解析成标识符
         touched = touched_objects("SELECT * FROM orders WHERE note = 'unterminated", default_database="shop")
         assert touched.usable is False
         assert touched.tables == set()

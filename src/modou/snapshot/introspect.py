@@ -1,12 +1,4 @@
-"""内省：对在线 MySQL 执行只读语句，产出结构化库清单。
-
-语句清单（全部只读，见 docs/formats.md）：
-- SELECT VERSION() 与相关会话/服务器变量；
-- information_schema 的 SCHEMATA / TABLES / COLUMNS / STATISTICS /
-  REFERENTIAL_CONSTRAINTS + KEY_COLUMN_USAGE / CHECK_CONSTRAINTS / VIEWS /
-  ROUTINES / TRIGGERS / EVENTS 查询；
-- SHOW CREATE TABLE/VIEW/PROCEDURE/FUNCTION/TRIGGER/EVENT。
-"""
+"""只读采集 MySQL 版本、服务器变量和数据库对象定义，生成结构化快照。"""
 
 from __future__ import annotations
 
@@ -34,11 +26,10 @@ from modou.snapshot.model import (
 )
 from modou.snapshot.sample import NoPrimaryKeyError, build_sample_sql, json_safe_value
 
-# 剥离 SHOW CREATE 输出中的 DEFINER 子句：灌入影子库后服务器会重写 DEFINER 为灌入者，
-# 不剥离将产生假差异（HANDOFF 已知坑）。
+# 影子库会改写 DEFINER，剥离该子句避免假差异。
 _DEFINER_PATTERN = re.compile(r"DEFINER\s*=\s*`[^`]+`@`[^`]+`\s*", re.IGNORECASE)
 
-# CREATE_OPTIONS 中的 auto_increment=N 是运行时计数器，非结构，剥离后存储
+# AUTO_INCREMENT 是运行时计数器，不属于表结构。
 _AUTO_INCREMENT_OPTION_PATTERN = re.compile(r"\bauto_increment=\d+\s*", re.IGNORECASE)
 
 
@@ -71,11 +62,7 @@ def _strip_runtime_options(create_options: str) -> str:
 def read_database_inventory(
     conn: pymysql.connections.Connection, db_name: str, *, sample_rows: int | None = None
 ) -> DatabaseInventory:
-    """读取单个库的完整结构清单；sample_rows 给定时附带每表采样数据（format v2）。
-
-    权限不足时直接抛出 MySQL 错误（fail-loud）：静默跳过对象会让后续 diff
-    产出「漏执行」假结论，比采集失败危害更大。库级 warnings 仅承载非致命提示。
-    """
+    """读取单库结构；权限错误直接抛出，避免静默漏采造成错误的 diff 结论。"""
     inventory = DatabaseInventory(name=db_name, charset="", collation="")
     with conn.cursor() as cursor:
         cursor.execute(
@@ -168,10 +155,10 @@ def _sample_table(
     limit: int,
     estimated_rows: int | None,
 ) -> TableSample:
-    """对单表执行确定性采样；无主键表记录跳过口径而非失败（结构与数据并重）。"""
+    """对单表确定性采样；无主键表记录跳过原因，不使采集失败。"""
     estimated = estimated_rows
     try:
-        # 多取一行：恰好 limit 行的未截断表不得误标 row_limit_reached（探测见下）
+        # 多取一行用于判断结果是否被截断
         sql = build_sample_sql(db_name, table, limit=limit + 1)
     except NoPrimaryKeyError as exc:
         return TableSample(
@@ -184,7 +171,7 @@ def _sample_table(
         )
     cursor.execute(sql)
     names = [str(desc[0]) for desc in cursor.description] if cursor.description else []
-    # 多取一行探测截断：恰好 limit 行的未截断表不得误标 row_limit_reached
+    # 超出 limit 说明结果被截断
     rows = [[json_safe_value(value) for value in row] for row in cursor.fetchall()]
     reached = len(rows) > limit
     rows = rows[:limit]
@@ -200,12 +187,7 @@ def _sample_table(
 
 
 def capture_snapshot(params: MysqlParams, database_names: list[str], *, sample_rows: int | None = None) -> Snapshot:
-    """对目标实例的指定库清单做一次只读采集。
-
-    版本低于采集支持地板（8.0）时显式拒绝：内省查询依赖 8.0+ 专有元数据，
-    老版本只会在查询期报 1054 一类晦涩错误。sample_rows 给定时为采样模式
-    （format v2，附采样数据节），供 optimize 影子实证使用。
-    """
+    """只读采集指定数据库；MySQL 版本须为 8.0 或更高。可选采集行样本供优化实证使用。"""
     conn = params.connect()
     try:
         meta = read_meta(conn)
@@ -284,8 +266,7 @@ def _read_foreign_keys(cursor: pymysql.cursors.Cursor, db_name: str, table_name:
         "JOIN information_schema.key_column_usage kcu "
         "ON rc.constraint_name = kcu.constraint_name AND rc.constraint_schema = kcu.constraint_schema "
         "AND kcu.table_name = rc.table_name "
-        # KEY_COLUMN_USAGE 对同库任意表的唯一索引也产出同名行（索引名仅表内唯一），
-        # 缺 table_name 关联会把他表列拼进本表 FK（referenced 列为 NULL 损坏快照）
+        # 唯一索引名仅表内唯一，关联必须带 table_name，否则会把其他表的列拼进本表外键
         "AND kcu.referenced_table_name IS NOT NULL "
         "WHERE rc.constraint_schema = %s AND rc.table_name = %s "
         "ORDER BY rc.constraint_name, kcu.ordinal_position",
@@ -310,7 +291,7 @@ def _read_foreign_keys(cursor: pymysql.cursors.Cursor, db_name: str, table_name:
 
 
 def _read_check_constraints(cursor: pymysql.cursors.Cursor, db_name: str, table_name: str) -> list[CheckDef]:
-    # enforced 取自 TABLE_CONSTRAINTS（8.4 的 CHECK_CONSTRAINTS 无 ENFORCED 列，该列两代都有）
+    # enforced 取自 TABLE_CONSTRAINTS：8.4 的 CHECK_CONSTRAINTS 没有该列
     cursor.execute(
         "SELECT cc.constraint_name, cc.check_clause, tc.enforced "
         "FROM information_schema.table_constraints tc "
@@ -326,8 +307,7 @@ def _read_check_constraints(cursor: pymysql.cursors.Cursor, db_name: str, table_
     ]
 
 
-# SHOW CREATE 各对象的结果集列名不同（TRIGGER/PROCEDURE/EVENT 的第 2 列是 sql_mode
-# 而非 DDL），必须按列名取，禁止按位置取。
+# SHOW CREATE 各对象的第 2 列含义不同，必须按列名取值。
 _DDL_COLUMN_BY_KIND: dict[str, str] = {
     "TABLE": "Create Table",
     "VIEW": "Create View",

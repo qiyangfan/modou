@@ -34,7 +34,7 @@ class _StubConn:
 
 
 def test_non_int_first_arg_yields_code_zero() -> None:
-    """pymysql 客户端侧错误可能只有 message 一个 arg：code 归 0 而非解包崩溃。"""
+    """客户端侧错误可能只有 message 一个参数，code 应归 0。"""
     conn = _StubConn(_StubCursor([pymysql.err.InternalError("just a message")]))
     result = replay_statements(conn, ["SELECT 1"])  # type: ignore[arg-type]
     assert result.executed_count == 0

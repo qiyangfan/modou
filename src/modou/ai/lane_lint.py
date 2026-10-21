@@ -1,12 +1,6 @@
-"""lint 残留语义评审（内置通道，design §5）：规则引擎之后，残留语句分包送 AI。
+"""评审 lint 引擎未命中的残留语句。
 
-- 残留面由 lint 引擎单趟产出（LintResult.residuals，与命中同源）——本模块只
-  做分包与受控调用，不重读文件、不重跑规则；
-- 上下文 = 变更分包（bundler）+ 已命中规则注入（injector）；审核车道纯静态、
-  无库连接，schema 上下文不适用；
-- 输出 = 结构化 JSON 逐条校验（幻觉定位与空观点逐条丢弃）；调用失败或回复
-  不可解析 → 该批降级为 degraded 观点（fail-safe 标注原因，不静默缺席）；
-- 本模块只产出 report.opinions.AiOpinion，永不影响退出码。
+只产出观点；无效条目丢弃，批次调用失败降级，不影响退出码。
 """
 
 from __future__ import annotations
@@ -49,7 +43,7 @@ def review_residual(
     max_statements: int = DEFAULT_MAX_STATEMENTS,
     max_chars: int = DEFAULT_MAX_CHARS,
 ) -> list[AiOpinion]:
-    """残留语句分包评审：每批一轮单turn调用，顺序聚合（并发由调用方按批展开）。"""
+    """分包评审残留语句，按批次顺序聚合并返回观点。"""
     if not units:
         return []
     rule_context = render_rule_context(hits)
@@ -85,7 +79,7 @@ def _review_batch(
         return [degraded(LANE, _batch_subject(batch), config.model, str(exc))]
     items = extract_json_array(content)
     if items is None:
-        # 回复不可解析同属调用失败（spec「调用失败降级」）：标注原因，不静默缺席
+        # 回复不可解析时按调用失败降级。
         return [degraded(LANE, _batch_subject(batch), config.model, "unparseable reply (no JSON array)")]
     opinions: list[AiOpinion] = []
     for item in items:
@@ -94,7 +88,7 @@ def _review_batch(
         subject = item.get("subject")
         text = item.get("opinion")
         if not isinstance(subject, str) or subject not in subjects:
-            continue  # 幻觉定位：指向批次外对象的条目丢弃
+            continue  # 丢弃指向批次外对象的条目
         if not isinstance(text, str) or not text.strip():
             continue
         opinions.append(AiOpinion(lane=LANE, subject=subject, opinion=text.strip(), model=config.model))

@@ -1,4 +1,4 @@
-# 迭代 32：订单域 — 示例变更集（modou pack/verify 演示与冒烟用）
+# 订单域示例变更集（用于 modou pack/verify 演示）
 V01__create_orders.sql
 V02__alter_orders_add_remark.sql
 V03__add_index_user_amount.sql

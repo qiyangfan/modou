@@ -1,4 +1,4 @@
-"""查询指纹归一测试（pt-query-digest 口径：字面量→占位符、IN/VALUES 折叠）。"""
+"""查询指纹归一测试：字面量转占位符，折叠 IN/VALUES 列表。"""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ class TestFingerprint:
 
 
 class TestSubqueryNotFolded:
-    """评审回归：IN (SELECT ...) 子查询不是值列表，不得折叠（不同形态必须不同指纹）。"""
+    """IN 子查询不是值列表，不应与列表形态折叠为同一指纹。"""
 
     def test_in_subquery_keeps_distinct_fingerprints(self) -> None:
         a = fingerprint("SELECT * FROM t WHERE id IN (SELECT id FROM x WHERE flag = 1)")

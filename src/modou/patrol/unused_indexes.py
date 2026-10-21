@@ -1,14 +1,6 @@
-"""未用索引与冗余索引巡检：分层判定（确认未用 / 疑似低用 / 数据不足）+ 离线冗余。
+"""巡检未用、低用和冗余索引，使用 performance_schema 计数与服务器 uptime。
 
-口径（2026-10 调研核实，出处见 change design §2/§3）：
-- 数据源 performance_schema.table_io_waits_summary_by_index_usage（8.0/8.4 默认开启；
-  INSERT 一律计入 INDEX_NAME=NULL 行）。注意 COUNT_STAR 是该索引的 I/O 总量：
-  UPDATE/DELETE 对索引的维护写同样计入——INSERT-only 表上零计数≈零读（与
-  sys.schema_unused_indexes 同口径），活跃更新表的「疑似低用」层可能因此偏高；
-- 统计会清零（重启全清/TRUNCATE/索引 DDL 重置）→ 结论必须交叉服务器 uptime；
-- 唯一索引被刻意排除（唯一性/约束语义不可丢，sys.schema_unused_indexes 同口径）；
-- 外键依赖索引排除（DROP 会触发 MySQL 自动重建索引）；
-- 冗余三情形对齐 sys.schema_redundant_indexes 源码语义（复用 optimize.sideeffects）。
+计数包含索引维护写入；统计可能被重启或 DDL 重置；唯一索引和外键依赖索引不判为未用。
 """
 
 from __future__ import annotations
@@ -39,12 +31,12 @@ STATUS_LABELS: dict[str, str] = {
     STATUS_EXCLUDED_FK: "排除（外键依赖）",
 }
 
-# 官方无阈值：uptime 至少覆盖一个完整业务周期（默认 7 天，须覆盖月度批任务时调大）
+# 默认观察 7 天，可按业务周期调大
 DEFAULT_OBSERVE_DAYS = 7
 
 
 class PerformanceSchemaDisabledError(Exception):
-    """performance_schema 被显式关闭：明确报错而非产出空结论误导。"""
+    """performance_schema 被关闭时明确报错，避免空结论误导。"""
 
 
 @dataclass
@@ -107,7 +99,7 @@ def read_uptime(conn: pymysql.connections.Connection) -> int:
         cursor.execute("SHOW GLOBAL STATUS LIKE 'Uptime'")
         row = cursor.fetchone()
     if row is None:
-        # uptime 与 performance_schema 无关：缺行是环境异常，映射 ValueError（退出码 2 口径）
+        # 缺行属环境异常，映射 ValueError（退出码 2）
         raise ValueError("cannot read server uptime (SHOW GLOBAL STATUS returned no row)")
     return int(row[1])
 
@@ -201,7 +193,7 @@ def judge_unused_indexes(
 
 
 def find_redundant_from_inventory(inventory: DatabaseInventory) -> list[RedundantIndex]:
-    """离线冗余判定（纯快照元数据，三情形，唯一性语义 + 外键依赖保护）。"""
+    """仅用快照元数据判定冗余索引，保留唯一性和外键依赖语义。"""
     redundancies: list[RedundantIndex] = []
     for table in inventory.tables.values():
         existing = sorted(index_views_from_table(table), key=lambda v: v.name)

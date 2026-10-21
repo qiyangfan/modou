@@ -1,10 +1,4 @@
-"""优化车道 · AI 候选生成（内置通道的 optimize 侧）：提示词、候选解析与失败降级。
-
-职责面见 ADR-0009（AI 当分析师），实证关与退出码条款见 ADR-0003（继续有效）。
-BYOK 客户端已收拢进 modou.ai.client（v0.5，行为不变）；本模块只保留优化车道
-的提示词与候选结构化解析。配置三元组缺一即未配置（零网络）；发送载荷仅含
-SQL 文本与 schema 元数据；失败一律降级为空候选（fail-safe，不阻塞报告）。
-"""
+"""构造 SQL 优化 AI 请求并解析候选；调用失败返回空清单。"""
 
 from __future__ import annotations
 
@@ -27,12 +21,12 @@ from modou.ai.client import (
 from modou.optimize.candidates import IndexCandidate
 from modou.snapshot.model import Snapshot
 
-# 向后兼容：历史调用方（CLI/测试）从本模块导入配置与传输类型
+# 兼容既有导入路径：AdvisorConfig 即 AiConfig
 AdvisorConfig = AiConfig
 
 
 def build_schema_summary(snapshot: Snapshot, databases: set[str]) -> list[dict[str, Any]]:
-    """schema 摘要（仅元数据）：库 → 表 → 列定义与索引，供 AI 理解结构。"""
+    """按库列出表、列与索引的元数据摘要。"""
     summary: list[dict[str, Any]] = []
     for db_name in sorted(snapshot.databases):
         if db_name not in databases:
@@ -68,11 +62,7 @@ def build_request_payload(
     explain_facts: dict[str, Any] | None = None,
     max_candidates: int = 5,
 ) -> dict[str, Any]:
-    """构造 OpenAI 兼容 chat/completions 请求体（JSON 输出约束在提示词中）。
-
-    explain_facts 是影子库基线 EXPLAIN 的预取事实（受控多轮的确定性半区，v0.5）：
-    候选生成基于实测计划而非模型猜测；缺省 None 保持 v0.2 one-shot 形态。
-    """
+    """构造请求体，可附基线 EXPLAIN 事实供模型定位高代价访问。"""
     system = (
         "You are a MySQL index and query advisor. Given one slow SQL statement and schema metadata, "
         f"propose at most {max_candidates} concrete suggestions. Respond with ONLY a JSON array; "
@@ -110,7 +100,7 @@ def maybe_fetch_candidates(
     transport: Transport = default_transport,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> list[IndexCandidate]:
-    """未配置直接返回空（零网络）；已配置则拉取候选，失败降级为空。"""
+    """未配置时返回空且不联网；已配置时拉取候选，失败降级为空。"""
     if config is None:
         return []
     return fetch_candidates(
@@ -132,7 +122,7 @@ def fetch_candidates(
     transport: Transport = default_transport,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> list[IndexCandidate]:
-    """调用 BYOK 端点并解析候选；任何失败降级为空清单（fail-safe，不阻塞报告）。"""
+    """调用 BYOK 端点并解析候选；失败返回空清单，不阻塞报告。"""
     payload = build_request_payload(config, statement_sql, schema_summary, explain_facts=explain_facts)
     try:
         content = complete(config, payload, transport=transport, timeout_seconds=timeout_seconds)
@@ -142,7 +132,7 @@ def fetch_candidates(
 
 
 def parse_candidate_content(content: str) -> list[IndexCandidate]:
-    """从模型回复提取 JSON 数组并解析候选；不可解析/形态不对的条目逐条丢弃。"""
+    """从回复中提取并解析候选；不可解析或形态不对的条目逐条丢弃。"""
     items = extract_json_array(content)
     if items is None:
         return []

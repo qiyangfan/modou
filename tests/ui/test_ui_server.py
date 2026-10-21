@@ -1,4 +1,4 @@
-"""薄报告层 Python 侧测试：加载器门禁、回环绑定拒绝、静态伺服边界、端到端冒烟。"""
+"""报告 UI 的 Python 侧测试：加载门禁、回环绑定、静态资源边界与端到端冒烟。"""
 
 from __future__ import annotations
 
@@ -88,14 +88,14 @@ class TestServerE2E:
         f = _write_report(tmp_path, "v.json", VERIFY_OK)
         server, _reports = run_ui([f], port=0, bind="127.0.0.1", open_browser=False)
         base = f"http://127.0.0.1:{server.server_address[1]}"
-        # 回环绑定实证：监听地址必须是 127.0.0.1，不存在任何外部监听
+        # 只允许监听 127.0.0.1
         assert server.server_address[0] == "127.0.0.1"
         try:
             # 报告清单端点
             with urllib.request.urlopen(f"{base}/api/reports", timeout=10) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             assert payload["reports"][0]["kind"] == "verify"
-            # 报告数据端点（id 为绝对路径，非 ASCII 场景由 percent-encoding 覆盖测试守护）
+            # 报告数据端点；id 是绝对路径，非 ASCII 由编码测试覆盖
             report_id = payload["reports"][0]["id"]
             with urllib.request.urlopen(f"{base}/api/reports/{report_id}", timeout=10) as response:
                 data = json.loads(response.read().decode("utf-8"))
@@ -115,7 +115,7 @@ class TestServerE2E:
 
 
 class TestReviewRegressions:
-    """评审回归：清单契约/URL 编码/Host 校验/版本门禁/去重。"""
+    """覆盖清单契约、URL 编码、Host 校验、版本门禁和路径去重。"""
 
     def test_boolean_version_rejected(self, tmp_path) -> None:
         # bool 是 int 子类：True == 1 不得冒充 v1
@@ -190,6 +190,6 @@ class TestReviewRegressions:
             server.server_close()
 
     def test_bind_ipv6_loopback_rejected(self) -> None:
-        # ::1 从未真正可用（getfqdn 崩溃 + 浏览器地址固定 127.0.0.1）：白名单显式拒绝
+        # ::1 不在白名单，显式拒绝
         with pytest.raises(UiBindError, match="loopback"):
             run_ui([], bind="::1", open_browser=False)

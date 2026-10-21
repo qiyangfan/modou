@@ -1,4 +1,4 @@
-"""规则注入器测试（design §4：lint 命中清单模板化注入，非自然语言转述）。"""
+"""规则注入器测试：验证命中按模板原样生成上下文。"""
 
 from __future__ import annotations
 

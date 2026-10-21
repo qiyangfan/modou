@@ -1,13 +1,6 @@
-"""verify 失败归因（内置通道，design §5）：三方 diff 事实 → AI 解释成因与修复建议。
+"""根据 verify 的差异结论、相关 SQL 和 schema 元数据生成失败归因观点。
 
-- 零差异（exit 0 且无回放错误）零调用：没有需要归因的对象；
-- 事实包 = 确定性结论（对象/类别/维度/期望实际值）+ 变更集语句（回放序号定位）
-  + schema 切片（触达裁剪，slicer 单源，只取 baseline——变更集新建表的定义经
-  语句全文在场，不依赖切片；漏执行场景下 after 快照同样缺该表，取了也补不到点）；
-  仅元数据与 SQL 文本，绝无数据行；
-- 输出逐条校验（subject 必须指向真实结论对象，幻觉条目丢弃）；调用失败降级为
-  单条 report 级 degraded 观点；
-- 只产出 report.opinions.AiOpinion，退出码免疫。
+只接受能关联到真实结论对象的输出；调用失败降级为报告级观点，不影响退出码。
 """
 
 from __future__ import annotations
@@ -31,7 +24,7 @@ from modou.snapshot.model import Snapshot
 
 LANE = "verify"
 
-# 事实包规模上限：结论对象数与单条期望/实际文本长度（约束载荷，不做语义截断承诺）
+# 事实包上限：结论数与单条文本长度，只约束载荷大小
 _MAX_CONCLUSIONS = 40
 _MAX_DETAIL_CHARS = 500
 
@@ -69,7 +62,7 @@ def attribute_findings(
             for index, statement in enumerate(split_statements(packed), start=1)
         ]
         schema = slice_schema([entry["sql"] for entry in statements], baseline, default_database=default_database)
-    except Exception as exc:  # 事实打包段任何失败（含切片异常）都按降级披露，不阻塞验收报告
+    except Exception as exc:  # 事实打包失败按降级披露，不阻塞验收报告
         return [degraded(LANE, "report", config.model, f"cannot prepare attribution facts: {exc}")]
     user_payload = {
         "conclusions": conclusions,
@@ -89,7 +82,7 @@ def attribute_findings(
         return [degraded(LANE, "report", config.model, str(exc))]
     items = extract_json_array(content)
     if items is None:
-        # 回复不可解析同属调用失败（spec「调用失败降级」）：标注原因，不静默缺席
+        # 回复不可解析时按调用失败降级。
         return [degraded(LANE, "report", config.model, "unparseable reply (no JSON array)")]
     opinions: list[AiOpinion] = []
     for item in items:
@@ -98,7 +91,7 @@ def attribute_findings(
         subject = item.get("subject")
         text = item.get("opinion")
         if not isinstance(subject, str) or subject not in conclusion_subjects:
-            continue  # 幻觉定位丢弃
+            continue  # 丢弃指向未知结论的条目
         if not isinstance(text, str) or not text.strip():
             continue
         opinions.append(AiOpinion(lane=LANE, subject=subject, opinion=text.strip(), model=config.model))
@@ -106,7 +99,7 @@ def attribute_findings(
 
 
 def _extract_facts(report_json: dict) -> tuple[set[str], list[dict], dict | None] | None:
-    """从报告 JSON 提取归因事实：无差异（零结论且无回放错误）返回 None（零调用）。"""
+    """提取归因事实；无结论且无回放错误时返回 None，调用方据此跳过 AI。"""
     conclusions: list[dict] = []
     subjects: set[str] = set()
     for db_name, db_conclusions in (report_json.get("databases") or {}).items():

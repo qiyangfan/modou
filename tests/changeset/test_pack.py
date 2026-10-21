@@ -26,7 +26,7 @@ def test_pack_merges_in_seq_order(tmp_path: Path) -> None:
     result = pack_changeset(tmp_path)
     assert result.packed_sql.index("V01__create.sql") < result.packed_sql.index("CREATE TABLE a")
     assert result.packed_sql.index("CREATE TABLE a") < result.packed_sql.index("ALTER TABLE a")
-    # 合并不产生破坏性预警；ADD COLUMN 有锁风险标注（kind=lock_risk），无破坏性类
+    # 合并没有破坏性预警；ADD COLUMN 只标锁风险
     assert all(w.kind != "destructive" for w in result.warnings)
 
 
@@ -36,7 +36,7 @@ def test_pack_preserves_delimiter_block(tmp_path: Path) -> None:
     result = pack_changeset(tmp_path)
     # 产物原文保留 DELIMITER 指令（mysql 客户端执行依赖）
     assert "DELIMITER $$" in result.packed_sql
-    # 切分视角：存储过程体完整为一条语句，不被内部的 ; 拆散
+    # 切分后存储过程体仍是一条语句，不被内部的分号拆散
     statements = split_packed(result.packed_sql)
     assert len(statements) == 1
     assert statements[0].startswith("CREATE PROCEDURE")
@@ -105,7 +105,7 @@ def test_pack_unparseable_statement_warns_but_succeeds(tmp_path: Path) -> None:
 
 
 def test_pack_embeds_provenance_header(tmp_path: Path) -> None:
-    """产物头部自证来源与口径（机械生成勿手改、文件/语句计数、预警摘要）。"""
+    """产物头部记录来源、文件/语句计数与预警摘要，并提示勿手改。"""
     write_changeset(
         tmp_path,
         {
@@ -119,7 +119,7 @@ def test_pack_embeds_provenance_header(tmp_path: Path) -> None:
     assert "2 个文件，2 条语句" in result.packed_sql
     assert "破坏性语句 1 条" in result.packed_sql
     assert "锁风险标注 1 条" in result.packed_sql
-    # 头部是纯注释：不得改变语句切分（首语句仍是 V01 的 DROP，尾部携带原文）
+    # 纯注释头不改变切分：首语句仍是 V01 的 DROP，尾部携带原文
     statements = split_packed(result.packed_sql)
     assert len(statements) == 2
     assert statements[0].endswith("DROP TABLE old_t;"[:-1])  # 切分语义：不含结尾分隔符
@@ -168,7 +168,7 @@ def test_split_packed_matches_discovery_order(tmp_path: Path) -> None:
     assert statements[1].endswith("CREATE TABLE b(id INT)")
 
 
-# ── 评审修复回归：粘连归因跳过空文件、发现警告前缀分流、不可读文件归一 ────────
+# ── 文件边界与目录警告 ──────────────────────────────────────────────────────
 
 
 def test_pack_culprit_attribution_skips_empty_files(tmp_path: Path) -> None:
@@ -178,7 +178,7 @@ def test_pack_culprit_attribution_skips_empty_files(tmp_path: Path) -> None:
     (tmp_path / "manifest.txt").write_text("V01__a.sql\nV02__empty.sql\nV03__c.sql\n", encoding="utf-8")
     with pytest.raises(ChangesetValidationError) as exc_info:
         pack_changeset(tmp_path)
-    # 粘连在拼 V03 时暴露，但根因是产出过语句的 V01，而非中间的空文件 V02
+    # 粘连在拼 V03 时暴露，根因是产出过语句的 V01，而非空文件 V02
     assert "V01__a.sql" in exc_info.value.errors[0]
 
 
@@ -201,8 +201,7 @@ def test_pack_rejects_non_utf8_file_as_validation_error(tmp_path: Path) -> None:
 
 
 def test_pack_rejects_unbalanced_delimiter_at_file_end(tmp_path: Path) -> None:
-    """回归（切分数守卫盲区）：前文件把 DELIMITER 留到 EOF 且后文件语句数恰好补平
-    时，切分数不变、守卫不报——预警序号会静默错位。pack 必须强制分隔符复位。"""
+    """前文件未复位 DELIMITER 时，即使合并后语句数未变也必须拒绝。"""
     (tmp_path / "V01__proc.sql").write_text(
         "DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; END$$\n", encoding="utf-8"
     )
@@ -215,7 +214,7 @@ def test_pack_rejects_unbalanced_delimiter_at_file_end(tmp_path: Path) -> None:
 
 
 def test_pack_accepts_delimiter_block_with_reset(tmp_path: Path) -> None:
-    """正常 DELIMITER 块（结束复位为 ;）不受新守卫影响。"""
+    """正常 DELIMITER 块（结束时复位为 ;）不受守卫影响。"""
     write_changeset(
         tmp_path,
         {

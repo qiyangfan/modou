@@ -1,5 +1,4 @@
-// 四类车道视图：只读渲染，全部数据来自所加载的报告（零外部请求）
-// 渲染入口（renderReport）对畸形报告兜底为错误卡，各 renderer 内部字段访问带缺省
+// 只读渲染已加载的报告；输入异常时显示错误卡。
 import type {
   AiOpinion,
   LintHit,

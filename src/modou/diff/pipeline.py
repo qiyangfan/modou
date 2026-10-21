@@ -1,12 +1,4 @@
-"""verify 验收管线：打包校验 → 影子回放 → 三方 diff → 报告与退出码。
-
-编排顺序（spec「回放推导期望态」「三方 diff 验收结论」）：
-1. pack 校验变更集（失败 = 输入错误，退出码 2）；
-2. 拉起影子容器，校验版本序列与平台参数（不兼容 = 环境错误，退出码 2）；
-3. 灌入基线快照 → 回放变更集 = 期望态（回放失败 = 输入错误，退出码 2，中止）；
-4. 内省影子库，与基线/实际两份快照逐库三方 diff；
-5. 报告聚合（按库分组），退出码取最严重档。
-"""
+"""验收管线：在影子库回放变更集推导期望态，再与基线和实际快照做三方 diff。"""
 
 from __future__ import annotations
 
@@ -34,7 +26,7 @@ ER_NO_DB_ERROR = 1046
 
 
 class VerifyInputError(Exception):
-    """verify 输入错误（变更集/快照文件问题），映射退出码 2。"""
+    """verify 输入错误，映射退出码 2。"""
 
     def __init__(self, errors: list[str]) -> None:
         super().__init__("; ".join(errors))
@@ -67,26 +59,22 @@ def run_verify(
     keep_container: bool = False,
     shadow: ShadowMySQL | None = None,
 ) -> VerifyOutcome:
-    """执行完整验收。容器用后即焚（keep_container=True 保留以便排查）。
-
-    shadow 参数供测试/复用场景注入已启动的容器：注入时本函数不拉起也不销毁。
-    """
+    """执行完整验收；默认销毁自建容器，注入的容器不接管生命周期。"""
     try:
-        # 锁风险注记口径随基线大版本（5.7 无 INSTANT），与影子镜像的版本序列同源推导
+        # 锁风险注记跟随基线大版本；5.7 无 INSTANT
         target_major = "5.7" if replay_env.version_series(baseline.meta.server_version).startswith("5.") else "8.0"
         pack = pack_changeset(changeset_dir, allow_legacy_names=allow_legacy_names, target_major=target_major)
     except ChangesetValidationError as exc:
         raise VerifyInputError(exc.errors) from exc
 
-    # 采集/内省依赖 8.0+ 专有元数据（STATISTICS.expression、CHECK_CONSTRAINTS），
-    # 更老版本在查询期才报晦涩错误——入口处显式拒绝（5.7 仅 pack 锁风险注记口径）
+    # 采集/内省依赖 8.0+ 元数据（STATISTICS.expression、CHECK_CONSTRAINTS），
+    # 入口处拒绝更老版本；5.7 只用于 pack 的锁风险注记
     version_errors = replay_env.unsupported_version_errors(baseline.meta)
     if version_errors:
         return _outcome(EXIT_ERROR, pack=pack, errors=version_errors)
 
     requested_dbs = _resolve_database_filter(baseline, after, database_filter)
-    # 基线缺库 = 变更集新建库场景：可验收（三方 diff 支持 None 基线），
-    # 但若回放后影子中也没有该库，则期望态无从推导，属输入错误（_verify_on_shadow 内判定）。
+    # 基线缺库可能是变更集新建库；只有回放后影子中也没有该库时才是输入错误
     baseline_missing = [db for db in requested_dbs if db not in baseline.databases]
 
     if shadow is not None:
@@ -95,15 +83,14 @@ def run_verify(
     started, failure = _start_shadow(image, baseline, container_cli, pack)
     if failure is not None:
         return failure
-    if started is None:  # 与 failure 二选一返回，防御性分支（不依赖 assert，python -O 安全）
+    if started is None:  # 与 failure 二选一；不用 assert，python -O 下仍生效
         return _outcome(EXIT_ERROR, pack=pack, errors=["shadow container did not start (unknown reason)"])
     try:
         return _verify_on_shadow(started, baseline, after, pack, requested_dbs, default_database, baseline_missing)
     finally:
         if not keep_container:
             with contextlib.suppress(ContainerRuntimeError):
-                # 清理失败不得吞掉已产出的验收结论（finally 抛异常会覆盖返回值）；
-                # 容器残留可经 podman/docker ps 识别后手动清理
+                # 清理失败不能覆盖已产出的验收结论；残留容器可用 podman/docker ps 查找
                 started.close()
 
 
@@ -138,9 +125,7 @@ def _verify_on_shadow(
     try:
         return _verify_on_shadow_inner(shadow, baseline, after, pack, requested_dbs, default_database, baseline_missing)
     except (pymysql.err.MySQLError, OSError, ValueError, RuntimeError) as exc:
-        # 影子库阶段的任何意外（灌入失败、依赖不收敛 RuntimeError、库缺失 ValueError、
-        # select_db 1049、内省失败等）都属环境/输入错误，必须收敛到退出码 2，
-        # 不得以裸异常穿透破坏确定性退出码契约（编程错误类异常不在此网内，保持响亮）
+        # 影子库阶段的运行异常收敛为退出码 2；编程错误不捕获
         return _outcome(EXIT_ERROR, pack=pack, errors=[f"shadow operation failed: {exc}"])
 
 
@@ -160,15 +145,13 @@ def _verify_on_shadow_inner(
         if compat_errors:
             return _outcome(EXIT_ERROR, pack=pack, errors=compat_errors)
 
-        # 会话 sql_mode 与基线对齐：同版本服务器的全局 sql_mode 也可能不同，
-        # 不对齐时同一语句在线上与影子行为可能不同，期望态会静默失真
+        # 会话 sql_mode 对齐基线，否则同一条语句可能得到不同结果
         _set_session_sql_mode(conn, baseline.meta.sql_mode)
         restore_snapshot(conn, baseline, database_filter=set(requested_dbs))
     finally:
         conn.close()
 
-    # 回放用全新会话：restore 会把会话库残留在最后一个灌入的库上，
-    # 复用会掩盖「未给 --default-database」的错误（未限定语句会静默落进残留库）
+    # 回放用新会话：restore 会残留当前库，复用会掩盖缺少 --default-database 的错误
     conn = shadow.connect_params().connect()
     try:
         _set_session_sql_mode(conn, baseline.meta.sql_mode)
@@ -181,7 +164,7 @@ def _verify_on_shadow_inner(
     finally:
         conn.close()
 
-    # 基线缺库且回放后影子中也没有：期望态无从推导，属输入错误
+    # 基线缺库且回放后影子中也没有：期望态无法推导
     un_derived = [db for db in baseline_missing if db not in expected_dbs]
     if un_derived:
         return _outcome(
@@ -235,7 +218,7 @@ def _replay_failed(pack: PackResult, error: ReplayError) -> VerifyOutcome:
 
 
 def _introspect_expected(conn: Connection, requested_dbs: list[str]) -> dict[str, DatabaseInventory]:
-    """内省影子库得到期望态；影子中不存在的库（快照缺失且变更未建）跳过，由管线判定。"""
+    """内省影子库得到期望态；不存在的库跳过，由管线判定。"""
     with conn.cursor() as cursor:
         cursor.execute("SELECT schema_name FROM information_schema.SCHEMATA")
         existing = {str(row[0]) for row in cursor.fetchall()}

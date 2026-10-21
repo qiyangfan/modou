@@ -1,5 +1,4 @@
-"""副作用检查测试：冗余三情形（sys.schema_redundant_indexes 语义）、唯一性语义
-保留、外键依赖、索引数上限与写放大提示。"""
+"""副作用检查测试：冗余三情形、唯一性语义保留、外键依赖、索引数上限与写放大提示。"""
 
 from __future__ import annotations
 
@@ -57,7 +56,7 @@ class TestRedundantPairs:
         assert [(r.name, d.name, case) for r, d, case in redundant] == [("idx_ab", "uk_a", "unique_prefix")]
 
     def test_unique_index_never_redundant_as_prefix_side(self) -> None:
-        """唯一性语义不可丢：唯一索引不能被更长的索引冗余掉。"""
+        """唯一索引不能被更长的索引判为冗余。"""
         pool = [IndexView("uk_a", ["a"], True, False), IndexView("idx_ab", ["a", "b"], False, False)]
         redundant = find_redundant_pairs(pool)
         # 顺序无关：仍是长索引被判冗余
@@ -112,7 +111,7 @@ class TestCandidateSideEffects:
         assert any(n.kind == "WRITE_AMPLIFICATION" for n in notes)
 
     def test_expression_only_index_skipped_in_comparisons(self) -> None:
-        """函数/表达式索引没有可比的普通列序：跳过比较而非误判。"""
+        """表达式索引没有可比的普通列序，跳过比较。"""
         table = _table([IndexDef("idx_expr", False, [IndexPart(1, None, None, "", "upper(`a`)")])])
         notes = check_candidate_side_effects(["a"], table, index_count_limit=10)
         assert not any(n.kind == "CANDIDATE_REDUNDANT" for n in notes)
@@ -141,7 +140,7 @@ class TestIndexViewsFromTable:
         views = {v.name: v for v in index_views_from_table(table)}
         assert views["idx_a"].columns == ["a"]
         assert views["idx_expr"].columns == ["a"]  # 表达式部分不计入列序
-        # 混合表达式索引整条不可比（最左前缀是表达式，普通列序比较会误判冗余）
+        # 含表达式部分的索引整条不可比，普通列序比较会误判冗余
         assert views["idx_expr"].expression_only is True
 
     def test_full_expression_index_flagged(self) -> None:
@@ -152,7 +151,7 @@ class TestIndexViewsFromTable:
 
 class TestPrefixIndexSemantics:
     def test_full_column_candidate_not_redundant_with_prefix_index(self) -> None:
-        """前缀索引 a(64) 与完整列索引不等价：候选不得被判冗余而跳过实证。"""
+        """前缀索引与完整列索引不等价，候选不能被判为冗余。"""
         from modou.snapshot.model import IndexDef, IndexPart, TableDef
 
         table = TableDef(
@@ -187,7 +186,7 @@ class TestPrefixIndexSemantics:
 
 class TestMixedExpressionIndex:
     def test_mixed_expression_index_not_compared_by_column_tail(self) -> None:
-        """(LOWER(name), age) 的最左前缀是表达式：候选 (age) 不得被判冗余跳过实证。"""
+        """最左前缀是表达式时，候选 (age) 不能被判为冗余。"""
         from modou.snapshot.model import IndexDef, IndexPart, TableDef
 
         table = TableDef(

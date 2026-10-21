@@ -1,4 +1,4 @@
-"""环境兼容检查单测：版本序列推导与采集支持地板（8.0）。"""
+"""环境兼容检查：版本序列推导与支持下限（8.0）。"""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def test_pre_8_baseline_rejected_with_pack_note() -> None:
     errors = unsupported_version_errors(_meta("5.7.40"))
     assert len(errors) == 1
     assert "not supported" in errors[0]
-    assert "pack" in errors[0]  # 5.7 仅 pack 锁风险注记口径的提示必须带上
+    assert "pack" in errors[0]  # 必须提示 5.7 仅支持 pack 锁风险注记
 
 
 def test_unparsable_version_rejected() -> None:

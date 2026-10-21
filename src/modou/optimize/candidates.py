@@ -1,11 +1,6 @@
-"""规则初筛层：慢 SQL 的确定性分析（候选索引 + 确定性发现）。
+"""分析慢 SQL 的 AST，产出确定性发现与索引候选。
 
-分层口径（v0.2 design §4）：本层是确定性裁判的一部分——「发现」是事实陈述
-（如「前导通配符使该条件无法走索引」），不需要实证；「候选」只是建议的输入，
-无论来源都必须过影子库实证关才能标「实测提升」。
-
-判定全部基于 sqlglot AST（唯一解析器，ADR-0006）；OR 分支不做单一列序结论
-（多列组合在 OR 语义下不成立），仅产出发现。
+发现是事实；候选须经影子库实证才能标为实测提升。OR 分支不生成组合索引候选。
 """
 
 from __future__ import annotations
@@ -19,18 +14,18 @@ import sqlglot.expressions as exp
 from modou.snapshot.model import ColumnDef, TableDef
 from modou.snapshot.sample import TEXT_PREFIX_LENGTH
 
-# 每条语句的候选上限：约束影子实证成本（每候选一次建索引+两次 ANALYZE）
+# 每语句候选上限，约束影子实证成本；每个候选需建索引并两次 ANALYZE
 MAX_CANDIDATES_PER_STATEMENT = 5
-# 候选索引最大列数：超过后区分度通常崩塌，价值极低
+# 候选索引最多列数；列数再多区分度通常骤降
 MAX_CANDIDATE_COLUMNS = 4
 
 _EQUALITY_KINDS = (exp.EQ, exp.In, exp.Like)
 _RANGE_KINDS = (exp.GT, exp.GTE, exp.LT, exp.LTE)
 _COMPARISON_KINDS = _EQUALITY_KINDS + _RANGE_KINDS
 
-# 谓词判定中的「中性包裹」：仅分组或翻转语义，不构成对列的函数/运算施加
+# 不影响列值的中性包裹：只分组或翻转语义，不算函数/运算
 _NEUTRAL_WRAPPERS = (exp.Not, exp.Paren, exp.In, exp.Like, exp.Is, exp.Between, exp.Exists)
-# 索引失效类包裹：标量函数与算术运算
+# 会让索引失效的算术运算
 _WRAPPING_KINDS = (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod)
 
 _NON_WORD_PATTERN = re.compile(r"\W")
@@ -42,7 +37,7 @@ class StatementTypeError(Exception):
 
 @dataclass
 class Finding:
-    """确定性发现：事实陈述，无需实证。"""
+    """确定性发现，无需实证的结论。"""
 
     code: str
     message: str
@@ -50,7 +45,7 @@ class Finding:
 
 @dataclass
 class IndexCandidate:
-    """索引候选：数据库/表 + 列序列。sql 为 AI 来源的原始建议语句或生成的 DDL。"""
+    """优化候选：索引（库/表/列）或改写 SQL。"""
 
     database: str | None
     table: str
@@ -69,12 +64,12 @@ class StatementAnalysis:
     is_select: bool = False
     findings: list[Finding] = field(default_factory=list)
     candidates: list[IndexCandidate] = field(default_factory=list)
-    # 语句引用的全部 (库, 表)——库已按 default_database 归一；供输入校验核对快照覆盖面
+    # 语句引用的全部 (库, 表)，库已按 default_database 归一，供快照覆盖校验
     referenced_tables: list[tuple[str, str]] = field(default_factory=list)
 
 
 def analyze_statement(sql: str, default_database: str | None) -> StatementAnalysis:
-    """解析单条语句并产出确定性发现与规则候选。解析失败/类型不支持向上抛。"""
+    """解析单条语句，产出发现与规则候选；解析失败或类型不支持时抛错。"""
     try:
         tree = sqlglot.parse_one(sql, read="mysql")
     except sqlglot.errors.ParseError as exc:
@@ -108,7 +103,7 @@ def analyze_statement(sql: str, default_database: str | None) -> StatementAnalys
 
 
 class _PredicateCollector:
-    """从连接条件与 WHERE 合取式中提取谓词列，聚合为每表候选。"""
+    """从连接条件和 WHERE 合取式中提取谓词列，按表聚合候选。"""
 
     def __init__(
         self,
@@ -117,7 +112,7 @@ class _PredicateCollector:
         default_database: str | None,
         analysis: StatementAnalysis,
     ) -> None:
-        # equality: (db, table) -> [columns]；range: (db, table) -> [第一列即可]
+        # 等值列按表累积；范围谓词只取首列
         self._equality: dict[tuple[str | None, str], list[str]] = {}
         self._range: dict[tuple[str | None, str], list[str]] = {}
         self._order_columns: tuple[str | None, str, list[str]] | None = None
@@ -142,17 +137,16 @@ class _PredicateCollector:
             self.collect_conjuncts(node)
             return
         if isinstance(node, exp.Between):
-            # BETWEEN 是可走索引的范围谓词（design「发现是事实陈述」：不得误标索引失效）
+            # BETWEEN 可走索引，不应报为索引失效。
             if isinstance(node.this, exp.Column):
                 if not (_contains_column(node.args.get("low")) or _contains_column(node.args.get("high"))):
                     self._add_predicate(node.this, node, is_range=True)
             else:
-                # 左值被包裹（ABS(a) BETWEEN ...）：包裹事实仍要报告
+                # 左值被包裹（如 ABS(a) BETWEEN ...），仍需报告
                 self._report_wrapped(node)
             return
         if not isinstance(node, _COMPARISON_KINDS):
-            # 非「列 vs 值」比较形态：仅当列确被函数/运算包裹时产出发现
-            # （IS NULL / NOT 等形态可走索引或仅翻转语义，不是事实）
+            # 非「列 vs 值」比较：只在列被函数/运算包裹时报发现；IS NULL、NOT 等可走索引
             self._report_wrapped(node)
             return
 
@@ -169,19 +163,19 @@ class _PredicateCollector:
             and isinstance(other, exp.Column)
             and isinstance(this, (exp.Literal, exp.Placeholder, exp.Parameter))
         ):
-            # 值/占位符在左侧的翻转写法（'x' = col）：同样成立
+            # 值在左侧的写法（'x' = col）同样成立
             self._add_predicate(other, node, is_range=isinstance(node, _RANGE_KINDS))
             return
         if this_is_column and isinstance(other, exp.Column):
-            # 列对列：两表各得一个等值列（过滤/连接谓词均可受益）
+            # 列对列：两侧各记一个等值列，连接和过滤都能受益
             self._add_column_equality(this)
             self._add_column_equality(other)
             return
-        # 其余形态（列被函数/运算包裹、子查询比较等）：只对真被包裹的列产出发现
+        # 其余形态只对真被包裹的列报发现
         self._report_wrapped(node)
 
     def _report_wrapped(self, node: exp.Expression) -> None:
-        """对「列确被函数/运算包裹」的谓词产出 FUNCTION_ON_COLUMN（查询边界内）。"""
+        """对列被函数或运算包裹的谓词产出 FUNCTION_ON_COLUMN。"""
         wrapped = [col.name for col in node.find_all(exp.Column) if _is_wrapped_column(col, node)]
         if wrapped:
             self._analysis.findings.append(
@@ -238,7 +232,7 @@ class _PredicateCollector:
             key=lambda t: (t[0] or "", t[1]),
         )
         if main_table is None and self._analysis.table == "?":
-            # 主表是派生表/无表形态：目标键 ("?",) 是哨兵不是真实表，不产候选
+            # 派生表或无表形态的主表键 "?" 是哨兵，不产候选
             sentinel = _main_table_key(self._analysis)
             targets = [t for t in targets if t != sentinel]
         for target in targets:
@@ -270,7 +264,7 @@ class _PredicateCollector:
         if qualifier:
             target = self._alias_map.get(qualifier)
             if target is None:
-                # qualifier 不是已知表/别名：同名单表兜底
+                # 未知限定名：若与已知表同名则按该表处理
                 if qualifier in self._tables:
                     return (self._default_database, qualifier)
                 return None
@@ -281,7 +275,7 @@ class _PredicateCollector:
 
 
 def _flatten_and(condition: exp.Expression) -> list[exp.Expression]:
-    """展开顶层 AND 合取式；OR 子树整体保留（由调用方按发现处理）。"""
+    """展开顶层 AND；OR 子树整体返回，由调用方处理。"""
     if isinstance(condition, exp.And):
         return _flatten_and(condition.this) + _flatten_and(condition.expression)
     return [condition]
@@ -296,11 +290,7 @@ def _contains_column(node: exp.Expression | None) -> bool:
 
 
 def _is_wrapped_column(column: exp.Column, root: exp.Expression) -> bool:
-    """列到比较根之间是否存在函数/运算包裹（中性包裹与分组不算）。
-
-    链上遇到查询边界（子查询/集合操作）即判 False：边界内的包裹属于嵌套
-    查询自己的谓词，与本层索引可用性无关。
-    """
+    """判断列到比较根之间是否有函数或运算；不计中性包裹，不跨查询边界。"""
     parent = column.parent
     seen_wrapper = False
     while parent is not None and parent is not root:
@@ -331,12 +321,7 @@ def _main_table_key(analysis: StatementAnalysis) -> tuple[str | None, str]:
 def _collect_tables(
     tree: exp.Expression, default_database: str | None
 ) -> tuple[set[str], dict[str, tuple[str | None, str]]]:
-    """收集语句引用的表：别名映射与表名集合；无库限定表归一到 default_database
-    （候选目标键带 None 会与带库键混排崩溃，且物化阶段按库名查表会误判未知表）。
-
-    CTE 名不是快照表：WITH 声明的别名（sqlglot 中同为 exp.Table 节点）必须排除，
-    否则引用表校验会要求快照包含一个只存在于语句内的名字。
-    """
+    """收集引用的表与别名；未限定库名归属 default_database，CTE 不算快照表。"""
     cte_names = {alias.name for cte in tree.find_all(exp.CTE) if (alias := cte.args.get("alias")) is not None}
     names: set[str] = set()
     alias_map: dict[str, tuple[str | None, str]] = {}
@@ -368,7 +353,7 @@ def _candidate_reason(equality: list[str], range_columns: list[str]) -> str:
 
 
 def is_covered_by_existing(columns: list[str], table: TableDef) -> str | None:
-    """候选列序列是否已被既有索引前缀覆盖；返回覆盖索引名（无则 None）。"""
+    """返回覆盖候选列序列的既有索引名，没有则返回 None。"""
     for index in table.indexes:
         existing = [part.column for part in index.parts if part.column]
         if existing[: len(columns)] == columns:
@@ -377,13 +362,13 @@ def is_covered_by_existing(columns: list[str], table: TableDef) -> str | None:
 
 
 def index_name_for_candidate(columns: list[str]) -> str:
-    """候选索引名：idx_ 前缀 + 列名连接（与 build_index_ddl 同源，供建/删对账）。"""
+    """生成 idx_ 前缀的候选索引名，建索引和删索引共用。"""
     sanitized = _NON_WORD_PATTERN.sub("_", "_".join(columns))[:56].strip("_") or "cols"
     return f"idx_{sanitized}"
 
 
 def build_index_ddl(candidate: IndexCandidate, columns_meta: dict[str, ColumnDef] | None = None) -> str:
-    """生成候选索引 DDL：命名 idx_ 前缀（STA.003 口径），TEXT/BLOB 列带前缀长度。"""
+    """生成候选索引 DDL；TEXT/BLOB 列带前缀长度。"""
     meta = columns_meta or {}
 
     def quote(name: str) -> str:

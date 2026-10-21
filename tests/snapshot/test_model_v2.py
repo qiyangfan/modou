@@ -1,4 +1,4 @@
-"""快照格式 v2（采样数据）与向后可读（v1 契约不动）的模型层测试。"""
+"""快照格式 v2（采样数据）与 v1 向后兼容测试。"""
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ def _snapshot(with_sample: bool, version: int = 2) -> Snapshot:
 
 class TestFormatV2RoundTrip:
     def test_current_format_version_is_2(self) -> None:
-        # 采样数据是 optimize 车道的前置（空表 EXPLAIN 无代价差异）
+        # 采样数据是 optimize 的前置；空表 EXPLAIN 没有代价差异
         assert FORMAT_VERSION == 2
 
     def test_v2_with_sample_round_trip_preserves_sample(self) -> None:
@@ -95,7 +95,7 @@ class TestFormatV2RoundTrip:
         assert restored.databases["shop"].tables["orders"].sample is None
 
     def test_v1_snapshot_still_readable(self) -> None:
-        """v1 快照（无 sample 键）必须仍可读：冻结契约的演进方式是向后可读。"""
+        """v1 快照（无 sample 键）必须仍可读。"""
         v1_text = json.dumps(json.loads(snapshot_to_json(_snapshot(with_sample=False))), ensure_ascii=False)
         raw = json.loads(v1_text)
         raw["format_version"] = 1
@@ -113,7 +113,7 @@ class TestFormatV2RoundTrip:
 
 
 class TestSampleValueConversion:
-    """行值的 JSON 化与还原：采样采集与影子灌入共用同一套转换。"""
+    """行值的 JSON 化与还原：采集和灌入共用同一套转换。"""
 
     def test_json_safe_values(self) -> None:
         from datetime import date, datetime
@@ -137,7 +137,7 @@ class TestSampleValueConversion:
     def test_restore_temporal_passes_through_as_string(self) -> None:
         from modou.snapshot.sample import restore_value
 
-        # MySQL 接受 'T' 分隔的 datetime 字面量：ISO 字符串直接作为参数传入
+        # MySQL 接受 'T' 分隔的 datetime 字面量，ISO 字符串可直接传参
         assert restore_value("2026-10-15T08:30:00", "datetime") == "2026-10-15T08:30:00"
 
 
@@ -191,7 +191,7 @@ class TestSampleSqlBuilder:
                 [IndexPart(1, "id", None, "A", None), IndexPart(2, None, None, "", "upper(`name`)")],
             )
         ]
-        # 函数索引部分不是可排序的普通列：只取普通列部分；全部为表达式时报错
+        # 函数索引部分不可排序；只取普通列，全为表达式时报错
         assert build_sample_sql("shop", table, limit=5).startswith("SELECT `id`")
         table.indexes = [IndexDef("PRIMARY", True, [IndexPart(1, None, None, "", "upper(`x`)")])]
         with pytest.raises(NoPrimaryKeyError):
@@ -199,7 +199,7 @@ class TestSampleSqlBuilder:
 
 
 class TestReviewRegressions:
-    """评审回归：v2 采样节解析防御与精度往返。"""
+    """验证 v2 采样节的结构校验与精度往返。"""
 
     def test_sample_missing_keys_is_value_error(self) -> None:
         import json as _json

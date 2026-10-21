@@ -31,7 +31,7 @@ class TestLintCli:
         assert result.exit_code == 0
 
     def test_parse_failure_recorded_exit_1(self, tmp_path) -> None:
-        """解析失败逐语句记录为 PARSE.001 命中，退出码 1、整轮不中断（spec 2026-10-15 修订）。"""
+        """解析失败记录为 PARSE.001，返回退出码 1 并继续审核。"""
         f = _write(tmp_path, "bad.sql", "SELECT 'unclosed\n")
         result = runner.invoke(app, ["lint", str(f)])
         assert result.exit_code == 1
@@ -58,7 +58,7 @@ class TestLintCli:
         # 未知规则 id = 输入错误（退出码 2）
         result2 = runner.invoke(app, ["lint", str(f), "--skip-rule", "NOPE.999"])
         assert result2.exit_code == 2
-        # 工具命中 PARSE.001 属合法跳过对象：仅含不可解析语句的输入跳过后恢复 0
+        # PARSE.001 可跳过：只有不可解析语句时，跳过后退出码为 0
         f2 = _write(tmp_path, "cond.sql", "SELECT 'unclosed\n")
         result3 = runner.invoke(app, ["lint", str(f2), "--skip-rule", "PARSE.001"])
         assert result3.exit_code == 0
@@ -81,7 +81,7 @@ class TestLintCli:
 
 
 class TestLintAiReview:
-    """lint 残留语义评审的 CLI 接线：配置驱动、观点进报告、退出码免疫。"""
+    """lint 残留评审接线：配置后观点进报告，退出码不变。"""
 
     def _spy_installed(self, monkeypatch, opinions):
         calls: list[dict] = []
@@ -94,7 +94,7 @@ class TestLintAiReview:
         return calls
 
     def test_unconfigured_makes_no_ai_call_and_report_unchanged(self, tmp_path, monkeypatch) -> None:
-        """未配置 BYOK：不调 AI、报告无 ai_opinions、行为与 v0.4 一致（零网络回归）。"""
+        """未配置 BYOK 时不调用 AI，报告不包含 ai_opinions。"""
         monkeypatch.delenv("MOUDO_AI_BASE_URL", raising=False)
         monkeypatch.delenv("MOUDO_AI_API_KEY", raising=False)
         monkeypatch.delenv("MOUDO_AI_MODEL", raising=False)

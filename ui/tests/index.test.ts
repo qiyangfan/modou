@@ -1,4 +1,4 @@
-// 入口集成测试：真实 fetch 解析契约（{reports:[...]}）——评审回归：曾因裸数组白屏
+// 入口集成测试：fetch 返回 {reports:[...]} 时正确解析并渲染。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 function stubFetchBodies(bodies: unknown[]): void {

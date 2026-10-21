@@ -1,18 +1,17 @@
-# 墨斗 pack 预警门禁（GitHub Actions 示例）
+# 使用 modou pack 检查变更集的 GitHub Actions 示例。
 #
-# ⚠️ 数据红线（宪法 4）：本示例只包含 pack —— 纯静态、零容器、零数据库连接。
-#    verify / optimize / snapshot capture 的输入快照含生产 schema 全文，
-#    禁止进入托管 CI 环境；验收类工作请在本机执行（本地门禁口径）。
+# pack 纯静态运行，不连接数据库。
+# verify、optimize 和 snapshot capture 需要本地快照，不应在托管 CI 中运行。
 #
-# 用法：把本文件复制为 .github/workflows/pack-gate.yml，按需修改 CHANGESET_DIR。
-# 预警以 job summary 回贴 PR；发现破坏性语句时用 exit code / grep 卡点可自行加严。
+# 复制到 .github/workflows/pack-gate.yml，并按需修改 CHANGESET_DIR。
+# 预警会写入 job summary；可按需增加破坏性语句检查。
 
 name: modou-pack-gate
 
 on:
   pull_request:
     paths:
-      - "migrations/**" # 变更集目录，按仓库实际路径调整
+      - "migrations/**" # 按仓库路径调整。
 
 jobs:
   pack-warnings:
@@ -43,11 +42,11 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # 可选卡点：出现 destructive 级预警即失败（按团队口径取舍）
+      # 可选：发现高风险变更时阻断门禁。
       - name: Fail on destructive warnings
         run: |
           set -euo pipefail
-          # 单独重跑本 step 时文件可能不在场：缺文件即失败，不得静默放行
+          # 独立重跑时也要求预警文件存在。
           [ -f pack-warnings.json ] || { echo "::error::pack-warnings.json missing"; exit 1; }
           if grep -q '"level": "high"' pack-warnings.json; then
             echo "::error::destructive changes detected (see pack warnings summary)"

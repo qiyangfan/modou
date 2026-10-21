@@ -1,5 +1,5 @@
--- 案例二场景搭建:orders 表 5 万行确定性合成数据(无随机量,可复现)。
--- 在目标库执行本文件后,用 modou snapshot capture --sample-rows 采集采样基线。
+-- 创建 5 万行可复现的 orders 示例数据。
+-- 执行后运行 modou snapshot capture --sample-rows 采集基线。
 DROP TABLE IF EXISTS orders;
 CREATE TABLE orders (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '订单号',

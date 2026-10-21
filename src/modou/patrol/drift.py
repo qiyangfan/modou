@@ -1,9 +1,4 @@
-"""漂移巡检：两份结构快照的两方对比（新增 / 缺失 / 定义变更）。
-
-与 verify 三方 diff 的边界：巡检没有变更集与期望态，只回答「两次采集之间线上
-被改了什么」——分类在维度/条目粒度进行（与三方 diff 同源口径，对象级整表比较
-会把「加列」误判为整表变更），复用同一套渲染。
-"""
+"""比较两份结构快照，按维度报告新增、缺失和定义变更。"""
 
 from __future__ import annotations
 
@@ -27,8 +22,7 @@ CATEGORY_CHANGED = "changed"
 
 
 def _normalize_ddl(ddl: str) -> str:
-    """SHOW CREATE DDL 的空白归一：跨服务器版本的换行/缩进差异是噪音不是漂移
-    （比较与展示必须同一口径，否则「判变更但显示相同」自相矛盾）。"""
+    """归一 DDL 空白，跨版本的换行和缩进不算漂移；比较和展示使用同一文本。"""
     return " ".join(ddl.split())
 
 
@@ -62,7 +56,7 @@ class DriftReport:
 
 
 def two_way_diff(baseline: DatabaseInventory | None, current: DatabaseInventory | None) -> list[DriftConclusion]:
-    """对单个库做两方对比：基线有现无=缺失，基线无现有=新增，两侧都有但维度不同=变更。"""
+    """对比单个库：基线有而当前无为缺失，反之为新增，两侧都有但维度不同为变更。"""
     anchor = baseline or current
     db_name = anchor.name if anchor else "?"
     conclusions: list[DriftConclusion] = []
@@ -75,7 +69,7 @@ def two_way_diff(baseline: DatabaseInventory | None, current: DatabaseInventory 
                 conclusions.extend(_diff_table(db_name, name, b_obj, c_obj))
             else:
                 conclusions.extend(_diff_definition(db_name, object_type, name, b_obj, c_obj))
-    # 库级字符集/collation
+    # 库级字符集与排序规则
     if baseline and current:
         sides = [
             side
@@ -185,7 +179,7 @@ def _diff_table(db_name: str, name: str, b_table: TableDef | None, c_table: Tabl
                 actual=_render_table_options(options_c),
             ),
         )
-    # 输出顺序稳定：缺失 → 新增 → 定义变更
+    # 固定输出顺序：缺失、新增、定义变更
     return [by_kind[k] for k in (CATEGORY_REMOVED, CATEGORY_ADDED, CATEGORY_CHANGED) if k in by_kind]
 
 
@@ -237,7 +231,7 @@ def drift_between_snapshots(
     baseline_databases: dict[str, DatabaseInventory],
     current_databases: dict[str, DatabaseInventory],
 ) -> DriftReport:
-    """按库清单逐库两方 diff 并聚合（多库默认，报告按库分组）。"""
+    """逐库做两方对比并按库聚合。"""
     report = DriftReport()
     for db_name in sorted(set(baseline_databases) | set(current_databases)):
         conclusions = two_way_diff(baseline_databases.get(db_name), current_databases.get(db_name))

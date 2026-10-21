@@ -1,4 +1,4 @@
-"""语句切分器用例：字符串/注释/DELIMITER 边界（回放正确性的地基）。"""
+"""语句切分器测试：字符串、注释与 DELIMITER 边界。"""
 
 from modou.replay.splitter import final_delimiter, split_statements
 

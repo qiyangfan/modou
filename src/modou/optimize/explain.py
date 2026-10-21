@@ -1,13 +1,6 @@
-"""执行计划采集与统计刷新：影子库实证的判定数据源（v0.2 design §2）。
+"""采集 EXPLAIN 计划并刷新统计，供影子库优化实证使用。
 
-判定口径（2026-10 调研，出处见 change design.md）：
-- 判定指标 = EXPLAIN FORMAT=JSON 顶层 query_block.cost_info.query_cost（估计代价）
-  与各访问表的 rows 估计；EXPLAIN ANALYZE（TREE，真实执行）的实测耗时仅作参考
-  信息，不参与判定；
-- 两个已核实事实：EXPLAIN ANALYZE 至 8.4 仍不支持 FORMAT=JSON（ERROR 1235）；
-  query_cost 字段官方手册未文档化（源码行为 + 社区考据）——解析必须容错降级；
-- InnoDB 统计为随机采样（random dives），ADD INDEX 无条件刷新该表索引统计：
-  基线与复测两侧各自显式 ANALYZE TABLE 拉平口径，是本模块调用方的固定流程。
+候选判定使用 JSON 计划中的估计代价；ANALYZE 实测耗时只作参考。缺少代价时记为不可得。
 """
 
 from __future__ import annotations
@@ -20,7 +13,7 @@ import pymysql.connections
 
 from modou.db import quote_ident
 
-# 顶层代价（query_block.cost_info.query_cost）；字段缺失（未文档化/版本差异）容错为 None
+# EXPLAIN JSON 中可能包含嵌套查询块的键，用于递归收集所有表访问
 _NESTED_BLOCK_KEYS = (
     "nested_loop",
     "grouping_operation",
@@ -36,7 +29,7 @@ _NESTED_BLOCK_KEYS = (
 
 
 class ExplainPlan:
-    """一次 EXPLAIN FORMAT=JSON 的提取结果（代价缺失时 query_cost=None）。"""
+    """EXPLAIN FORMAT=JSON 的解析结果；代价缺失时 query_cost 为 None。"""
 
     def __init__(self, query_cost: float | None, table_accesses: list[dict]) -> None:
         self.query_cost = query_cost
@@ -54,17 +47,14 @@ def explain_json(conn: pymysql.connections.Connection, sql: str) -> ExplainPlan:
 
 
 def explain_analyze_tree(conn: pymysql.connections.Connection, sql: str) -> str:
-    """执行 EXPLAIN ANALYZE 返回 TREE 文本（实测耗时参考信息）；不支持/失败由调用方降级。"""
+    """执行 EXPLAIN ANALYZE 并返回 TREE 文本；失败由调用方降级。"""
     with conn.cursor() as cursor:
         cursor.execute("EXPLAIN ANALYZE " + sql)
         return "\n".join(str(row[0]) for row in cursor.fetchall())
 
 
 def parse_explain_json(text: str) -> ExplainPlan:
-    """解析 EXPLAIN JSON：顶层代价 + 递归收集访问表（table_name/rows/access_type）。
-
-    rows 在 JSON 中可能是字符串（MySQL 8 行为）：统一转 int；转不了按 0 记。
-    """
+    """提取顶层代价与表访问信息；rows 转整数，无法解析时记为 0。"""
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -127,16 +117,11 @@ def refresh_statistics(
     conn: pymysql.connections.Connection,
     tables: list[tuple[str, str]],
 ) -> None:
-    """对给定 (库, 表) 清单逐个 ANALYZE TABLE（同步前台重算，拉平统计口径）。
-
-    采样页参数（innodb_stats_persistent_sample_pages）是 GLOBAL 变量：尝试调大以
-    换取 cardinality 估计稳定（默认 20 → 128）；无权限时降级跳过（仅影响稳定性，
-    不影响判定流程本身）。
-    """
+    """逐个执行 ANALYZE TABLE，并尝试调大统计采样页数以稳定基数估计。"""
     with conn.cursor() as cursor:
-        # 无 GLOBAL 权限时降级跳过（仅影响统计稳定性，不影响判定流程；风险已在报告声明）
+        # 无 GLOBAL 权限时跳过采样页调整
         with contextlib.suppress(pymysql.err.MySQLError):
             cursor.execute("SET GLOBAL innodb_stats_persistent_sample_pages = 128")
         for database, table in tables:
             cursor.execute(build_analyze_sql(database, table))
-            cursor.fetchall()  # ANALYZE 返回结果集（Msg_text），耗尽后才算完成
+            cursor.fetchall()  # ANALYZE 返回结果集，需读空才算完成

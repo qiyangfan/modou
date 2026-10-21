@@ -1,11 +1,6 @@
-"""快照数据模型：导出格式的唯一事实源（format_version=2，v1 向后可读，见 docs/formats.md）。
+"""定义快照导出模型和 JSON 转换。
 
-设计要点：
-- 结构化字段（列/索引/约束）供三方 diff 逐维对比，DDL 原文仅供灌入与人工排查；
-- 内省侧已对 DDL 归一化（剥离 DEFINER），因此本模型不再做二次归一；
-- 表选项不比较 AUTO_INCREMENT 计数器（运行时状态，非结构）；
-- v2 新增可选采样数据节（TableSample）：结构快照照旧（sample=None），
-  采样快照供 optimize 影子实证使用（空表 EXPLAIN 无代价差异，见 design）。
+结构字段用于 diff，归一化 DDL 用于灌入；可选采样数据供优化实证使用，支持读取格式 v1 和 v2。
 """
 
 from __future__ import annotations
@@ -14,19 +9,19 @@ import json
 from dataclasses import asdict, dataclass, field
 
 FORMAT_VERSION = 2
-# v1=纯结构（冻结契约）；v2=结构 + 可选采样数据。新版本必须保持向后可读。
+# v1 只有结构；v2 增加可选采样数据
 SUPPORTED_FORMAT_VERSIONS = (1, 2)
 
 
 @dataclass
 class TableSample:
-    """表的采样数据节：确定性样本集 + 实证环境数据规模元信息。"""
+    """表的确定性样本与数据规模信息。"""
 
     columns: list[str] = field(default_factory=list)
     rows: list[list] = field(default_factory=list)
     sampled_rows: int = 0
     estimated_rows: int | None = None
-    method: str = "primary_key_asc"  # skipped_no_primary_key / row_limit_reached 等口径随行
+    method: str = "primary_key_asc"  # 采样方式，如 primary_key_asc、skipped_no_primary_key
     note: str = ""
 
 
@@ -48,7 +43,7 @@ class IndexPart:
     seq: int
     column: str
     sub_part: int | None
-    direction: str  # "A" / "D" / ""（MySQL 8.0 函数索引无方向）
+    direction: str  # "A"/"D"/""；函数索引无方向
     expression: str | None
 
 
@@ -93,7 +88,7 @@ class TableDef:
 
 @dataclass
 class ObjectDef:
-    """视图 / 存储过程 / 函数 / 触发器 / 事件：以归一化 DDL 为比较与灌入载体。"""
+    """视图、过程、函数、触发器和事件，以归一化 DDL 为比较与灌入载体。"""
 
     name: str
     ddl: str
@@ -134,11 +129,7 @@ class Snapshot:
 
 
 def snapshot_to_json(snapshot: Snapshot) -> str:
-    """序列化为导出格式（缩进 2 空格，人可读、可 diff）。
-
-    allow_nan=False：NaN/Infinity 会产出非 RFC 8259 的 JSON（下游 json.loads
-    各实现行为不一），宁可采集期响亮失败。
-    """
+    """序列化为易读 JSON；拒绝 NaN 和 Infinity 等非标准 JSON 数值。"""
     return json.dumps(asdict(snapshot), ensure_ascii=False, indent=2, allow_nan=False) + "\n"
 
 
@@ -152,8 +143,7 @@ def _require_int(value: object, where: str) -> int:
 
 
 def _require_dict(value: object, where: str) -> dict:
-    """反序列化防御：容器字段必须是 JSON object，否则报 ValueError（CLI 收敛退出码 2），
-    而不是让 AttributeError/TypeError 之类裸穿透。"""
+    """要求字段为 JSON object，格式错误时抛出 ValueError。"""
     if not isinstance(value, dict):
         raise ValueError(f"snapshot field {where} must be a JSON object")
     return value
@@ -166,10 +156,7 @@ def _require_list(value: object, where: str) -> list:
 
 
 def snapshot_from_json(text: str) -> Snapshot:
-    """从导出格式反序列化；格式版本不匹配或容器结构非法即拒绝（防静默误读）。
-
-    v1/v2 均可读（向后可读契约）：v1 无 sample 键 → sample=None。
-    """
+    """反序列化快照 JSON；拒绝不支持的版本或非法字段结构。"""
     raw = json.loads(text)
     raw = _require_dict(raw, "<root>")
     if raw.get("format_version") not in SUPPORTED_FORMAT_VERSIONS:

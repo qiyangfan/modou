@@ -82,11 +82,7 @@ class TestOptimizeCliErrors:
 
 class TestSnapshotCaptureSamplingFlag:
     def test_sample_rows_flag_registered(self) -> None:
-        """--sample-rows 已注册（契约面）。
-
-        不对渲染后的 help 文本断言字面选项串：rich 输出带 ANSI 转义、换行随
-        终端宽度/着色环境变化（CI 无终端即触发），渲染形态不是契约。
-        """
+        """确认 --sample-rows 已注册，不依赖终端渲染文本。"""
         result = runner.invoke(app, ["snapshot", "capture", "--help"])
         assert result.exit_code == 0
         import typer.main

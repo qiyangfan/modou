@@ -167,8 +167,7 @@ class TestIndexDdl:
 
 
 class TestAliasAndQualification:
-    """别名/混合库限定/派生表等真实世界写法（评审回归：别名曾整体丢候选、
-    混合限定曾在聚合排序时 TypeError 崩溃）。"""
+    """覆盖别名、混合库限定和派生表中的候选解析。"""
 
     def test_alias_target_resolved_to_default_database(self) -> None:
         analysis = analyze_statement("SELECT * FROM orders o WHERE o.user_id = 1", "shop")
