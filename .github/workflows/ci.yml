@@ -13,6 +13,7 @@ jobs:
   # Python 内核门禁
   core:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -34,8 +35,10 @@ jobs:
         run: uv run modou --help
 
   # UI 目录不存在时跳过前端门禁。
+  # hashFiles 仅 step 级可用,目录存在性判定须由独立 job 输出。
   ui-detect:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       exists: ${{ steps.check.outputs.exists }}
     steps:
@@ -48,6 +51,7 @@ jobs:
     needs: ui-detect
     if: needs.ui-detect.outputs.exists == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: ui
