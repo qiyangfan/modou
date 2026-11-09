@@ -22,3 +22,6 @@ ui/node_modules/
 # 系统
 .DS_Store
 
+
+# HANDOFF 仅本地维护,不入库(开源准备)
+docs/HANDOFF.md
