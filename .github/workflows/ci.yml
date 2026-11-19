@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           # 3.12 是项目支持的最低版本。
           python-version: "3.12"

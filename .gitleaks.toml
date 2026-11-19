@@ -1,0 +1,11 @@
+title = "repo secrets policy"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "仅允许测试夹具与文档中的假值；新增豁免须逐条写原因"
+paths = [
+  '''(^|/)tests?/fixtures/''',
+  '''(^|/)docs/.*\.(md|png|jpg)$''',
+]
