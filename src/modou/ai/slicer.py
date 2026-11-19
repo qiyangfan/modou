@@ -59,6 +59,16 @@ def slice_schema(
     max_chars: int = DEFAULT_SCHEMA_BUDGET_CHARS,
 ) -> list[dict]:
     """按触达范围返回 schema 条目；触达表必含，其他同库表受字符预算限制。"""
+    all_touched, _ = _collect_touched(statements, default_database)
+    resolved = _resolve_touched(all_touched, snapshot)
+    if not resolved:
+        return []
+    ordered, used = _initial_entries(resolved, snapshot)
+    _extend_with_budget(ordered, used, resolved, snapshot, max_chars)
+    return ordered
+
+
+def _collect_touched(statements: list[str], default_database: str | None) -> tuple[TouchedContext, str | None]:
     all_touched = TouchedContext()
     current_default = default_database
     for statement in statements:
@@ -71,20 +81,33 @@ def slice_schema(
         if touched.databases:
             # USE 只作用于后续未限定库名的语句。
             current_default = sorted(touched.databases)[0] if len(touched.databases) == 1 else current_default
+    return all_touched, current_default
 
+
+def _resolve_touched(all_touched: TouchedContext, snapshot: Snapshot) -> set[tuple[str, str]]:
     # 只保留快照中真实存在的库表
     resolved: set[tuple[str, str]] = set()
     for db_name, table_name in all_touched.tables:
         inventory = snapshot.databases.get(db_name)
         if inventory is not None and table_name in inventory.tables:
             resolved.add((db_name, table_name))
-    if not resolved:
-        return []
+    return resolved
 
+
+def _initial_entries(resolved: set[tuple[str, str]], snapshot: Snapshot) -> tuple[list[dict], int]:
     entry_by_key = {key: _table_entry(key[0], key[1], snapshot) for key in resolved}
     ordered: list[dict] = [entry_by_key[key] for key in sorted(resolved)]
     used = sum(len(json.dumps(entry, ensure_ascii=False)) for entry in ordered)
+    return ordered, used
 
+
+def _extend_with_budget(
+    ordered: list[dict],
+    used: int,
+    resolved: set[tuple[str, str]],
+    snapshot: Snapshot,
+    max_chars: int,
+) -> None:
     touched_dbs = {db for db, _ in resolved}
     for db_name in sorted(snapshot.databases):
         for table_name in sorted(snapshot.databases[db_name].tables):
@@ -95,12 +118,8 @@ def slice_schema(
             entry = _table_entry(db_name, table_name, snapshot)
             used += len(json.dumps(entry, ensure_ascii=False))
             if used > max_chars:
-                break  # 预算耗尽后不再补充；已排入的触达条目保留
+                return  # 预算耗尽后不再补充；已排入的触达条目保留
             ordered.append(entry)
-        else:
-            continue
-        break
-    return ordered
 
 
 def _table_entry(db_name: str, table_name: str, snapshot: Snapshot) -> dict:

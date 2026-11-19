@@ -30,6 +30,10 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff format --check .
       - run: uv run ruff check .
+      # 体积门禁（kongming 同口径：pylint 默认阈值 1000 行 / 20 个公有方法）。
+      - run: uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods --jobs=0 src/modou
+      # 分层门禁：内核不得反向依赖 CLI/MCP/UI（ADR-0002）。
+      - run: uv run lint-imports
       - run: uv run pytest -q
       - name: CLI 冒烟
         run: uv run modou --help
@@ -63,4 +67,5 @@ jobs:
       - run: npm ci
       - run: npm run typecheck --if-present
       - run: npm run lint --if-present
+      - run: npm run format:check --if-present
       - run: npm test --if-present

@@ -27,45 +27,50 @@ def fingerprint(sql: str) -> str:
     n = len(tokens)
     while i < n:
         token = tokens[i]
-        if token.token_type in (TokenType.COMMENT,):
+        if token.token_type == TokenType.COMMENT:
             i += 1
             continue
-        # IN/VALUES 的值列表整体折叠为一个占位符；IN (SELECT ...) 不是值列表，不能合并
-        if token.token_type in (TokenType.IN, TokenType.VALUES):
-            group_start = _next_significant(tokens, i + 1)
-            if group_start is not None and tokens[group_start].token_type == TokenType.L_PAREN:
-                head = _next_significant(tokens, group_start + 1)
-                if head is not None and _is_value_list_head(tokens[head]):
-                    out.append("?")
-                    i = _skip_paren_group(tokens, group_start)
-                    # 多值 INSERT 的后续 VALUES 分组一并折叠
-                    while True:
-                        comma_at = _next_significant(tokens, i)
-                        if comma_at is None or tokens[comma_at].token_type != TokenType.COMMA:
-                            break
-                        group_at = _next_significant(tokens, comma_at + 1)
-                        if group_at is None or tokens[group_at].token_type != TokenType.L_PAREN:
-                            break
-                        i = _skip_paren_group(tokens, group_at)
-                    continue
-        text = token.text
-        token_type = token.token_type
-        if token_type in (
-            TokenType.STRING,
-            TokenType.NUMBER,
-            TokenType.HEX_STRING,
-            TokenType.NULL,
-            TokenType.BIT_STRING,
-        ):
+        folded_until = _fold_value_list(tokens, i)
+        if folded_until is not None:
             out.append("?")
-        elif token_type in (TokenType.IDENTIFIER, TokenType.VAR):
-            # 标识符保留并小写；内嵌数字替换，使 users_2009 与 users_2010 归为一类
-            bare = text.strip('`"').lower()
-            out.append(_EMBEDDED_DIGITS.sub("?", bare))
-        else:
-            out.append(text.lower())
+            i = folded_until
+            continue
+        out.append(_normalize_token(token))
         i += 1
     return " ".join(out)
+
+
+def _fold_value_list(tokens: list, i: int) -> int | None:
+    """IN/VALUES 后接值列表时返回折叠后的下标；子查询不折叠。"""
+    if tokens[i].token_type not in (TokenType.IN, TokenType.VALUES):
+        return None
+    group_start = _next_significant(tokens, i + 1)
+    if group_start is None or tokens[group_start].token_type != TokenType.L_PAREN:
+        return None
+    head = _next_significant(tokens, group_start + 1)
+    if head is None or not _is_value_list_head(tokens[head]):
+        return None
+    i = _skip_paren_group(tokens, group_start)
+    # 多值 INSERT 的后续 VALUES 分组一并折叠
+    while True:
+        comma_at = _next_significant(tokens, i)
+        if comma_at is None or tokens[comma_at].token_type != TokenType.COMMA:
+            return i
+        group_at = _next_significant(tokens, comma_at + 1)
+        if group_at is None or tokens[group_at].token_type != TokenType.L_PAREN:
+            return i
+        i = _skip_paren_group(tokens, group_at)
+
+
+def _normalize_token(token: object) -> str:
+    token_type = token.token_type  # type: ignore[attr-defined]
+    if token_type in _VALUE_TOKENS:
+        return "?"
+    if token_type in (TokenType.IDENTIFIER, TokenType.VAR):
+        # 标识符保留并小写；内嵌数字替换，使 users_2009 与 users_2010 归为一类
+        bare = token.text.strip('`"').lower()  # type: ignore[attr-defined]
+        return _EMBEDDED_DIGITS.sub("?", bare)
+    return token.text.lower()  # type: ignore[attr-defined]
 
 
 def _next_significant(tokens: list, start: int) -> int | None:

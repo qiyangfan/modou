@@ -82,6 +82,95 @@ def dist_dir() -> Path:
     raise ReportLoadError("report UI assets not found (built ui/dist missing); rebuild with: cd ui && npm run build")
 
 
+class _ReportServer(ThreadingHTTPServer):
+    """持有报告与静态资源目录，供请求处理器读取。"""
+
+    daemon_threads = True  # 请求线程不阻塞进程退出。
+    reports: list[LoadedReport]
+    assets_dir: Path
+
+
+class _ReportHandler(BaseHTTPRequestHandler):
+    server: _ReportServer
+
+    def do_GET(self) -> None:
+        if not self._host_is_loopback():
+            # 阻止 DNS rebinding 读取本机报告。
+            self.send_error(403)
+            return
+        if self.path == "/api/reports":
+            self._json(
+                {
+                    "reports": [
+                        {"id": report.id, "kind": report.kind, "version": report.version, "source": report.source}
+                        for report in self.server.reports
+                    ]
+                }
+            )
+            return
+        if self.path.startswith("/api/reports/"):
+            self._serve_report(urllib.parse.unquote(self.path.removeprefix("/api/reports/")))
+            return
+        self._serve_static(self.path)
+
+    def _serve_report(self, report_id: str) -> None:
+        # 先解码报告 ID 再匹配。
+        for report in self.server.reports:
+            if report.id == report_id:
+                self._json(
+                    {
+                        "id": report.id,
+                        "kind": report.kind,
+                        "version": report.version,
+                        "source": report.source,
+                        "data": report.data,
+                    }
+                )
+                return
+        self.send_error(404)
+
+    def _host_is_loopback(self) -> bool:
+        host = self.headers.get("Host", "")
+        hostname = host.rsplit(":", 1)[0].strip("[]") if host else ""
+        return hostname in _LOOPBACK_BINDS
+
+    def _serve_static(self, path: str) -> None:
+        relative = "index.html" if path in ("/", "") else path.removeprefix("/")
+        target = (self.server.assets_dir / relative).resolve()
+        # 只允许读取静态资源目录内的文件。
+        try:
+            target.relative_to(self.server.assets_dir)
+        except ValueError:
+            self.send_error(404)
+            return
+        if not target.is_file():
+            self.send_error(404)
+            return
+        content_type = {
+            ".html": "text/html; charset=utf-8",
+            ".js": "text/javascript; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".svg": "image/svg+xml",
+        }.get(target.suffix, "application/octet-stream")
+        body = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, payload: object) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass  # 不输出访问日志。
+
+
 def run_ui(
     report_paths: list[Path],
     *,
@@ -101,85 +190,9 @@ def run_ui(
     unique_paths = list(dict.fromkeys(str(Path(p).resolve()) for p in report_paths))
     reports = [load_report(Path(p)) for p in unique_paths]
     assets_dir = dist_dir().resolve()
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            if not self._host_is_loopback():
-                # 阻止 DNS rebinding 读取本机报告。
-                self.send_error(403)
-                return
-            if self.path == "/api/reports":
-                self._json(
-                    {
-                        "reports": [
-                            {"id": report.id, "kind": report.kind, "version": report.version, "source": report.source}
-                            for report in reports
-                        ]
-                    }
-                )
-                return
-            if self.path.startswith("/api/reports/"):
-                # 先解码报告 ID 再匹配。
-                report_id = urllib.parse.unquote(self.path.removeprefix("/api/reports/"))
-                for report in reports:
-                    if report.id == report_id:
-                        self._json(
-                            {
-                                "id": report.id,
-                                "kind": report.kind,
-                                "version": report.version,
-                                "source": report.source,
-                                "data": report.data,
-                            }
-                        )
-                        return
-                self.send_error(404)
-                return
-            self._serve_static(self.path)
-
-        def _host_is_loopback(self) -> bool:
-            host = self.headers.get("Host", "")
-            hostname = host.rsplit(":", 1)[0].strip("[]") if host else ""
-            return hostname in _LOOPBACK_BINDS
-
-        def _serve_static(self, path: str) -> None:
-            relative = "index.html" if path in ("/", "") else path.removeprefix("/")
-            target = (assets_dir / relative).resolve()
-            # 只允许读取静态资源目录内的文件。
-            try:
-                target.relative_to(assets_dir)
-            except ValueError:
-                self.send_error(404)
-                return
-            if not target.is_file():
-                self.send_error(404)
-                return
-            content_type = {
-                ".html": "text/html; charset=utf-8",
-                ".js": "text/javascript; charset=utf-8",
-                ".css": "text/css; charset=utf-8",
-                ".svg": "image/svg+xml",
-            }.get(target.suffix, "application/octet-stream")
-            body = target.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def _json(self, payload: object) -> None:
-            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, format: str, *args: object) -> None:
-            pass  # 不输出访问日志。
-
-    server = ThreadingHTTPServer((bind, port), Handler)
-    server.daemon_threads = True  # 请求线程不阻塞进程退出。
+    server = _ReportServer((bind, port), _ReportHandler)
+    server.reports = reports
+    server.assets_dir = assets_dir
     threading.Thread(target=server.serve_forever, daemon=True, name="modou-ui-http").start()
     if open_browser:
         # CLI 也会输出服务地址。

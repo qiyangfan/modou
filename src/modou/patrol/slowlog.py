@@ -52,81 +52,96 @@ class SlowlogReport:
 
 def parse_slowlog(text: str) -> tuple[list[SlowEntry], int]:
     """返回条目清单和跳过条目数；指标值损坏时跳过该条，不中断解析。"""
-    entries: list[SlowEntry] = []
-    skipped = 0
-    metrics: tuple[float, float, int, int] | None = None
-    time_hint: str | None = None
-    pending_time_hint: str | None = None
-    statement_lines: list[str] = []
+    return _SlowlogParser().parse(text)
 
-    def flush() -> None:
-        nonlocal metrics, statement_lines
-        statement = "\n".join(statement_lines).strip()
-        if metrics is not None and statement:
-            query_time, lock_time, rows_sent, rows_examined = metrics
-            entries.append(
+
+class _SlowlogParser:
+    """逐行状态机：条目在 Query_time 头出现时开始，在 USE/EOF/下一条目头时收束。"""
+
+    def __init__(self) -> None:
+        self.entries: list[SlowEntry] = []
+        self.skipped = 0
+        self.metrics: tuple[float, float, int, int] | None = None
+        self.time_hint: str | None = None
+        self.pending_time_hint: str | None = None
+        self.statement_lines: list[str] = []
+
+    def parse(self, text: str) -> tuple[list[SlowEntry], int]:
+        for raw_line in text.splitlines():
+            self._consume(raw_line.rstrip("\r"))
+        self.flush()
+        return self.entries, self.skipped
+
+    def _consume(self, line: str) -> None:
+        if line.startswith("#"):
+            self._consume_header(line)
+            return
+        if self._consume_control(line):
+            return
+        if line.strip() == "" and self.metrics is None:
+            return
+        self.statement_lines.append("" if line.strip() == "" else line)
+
+    def _consume_header(self, line: str) -> None:
+        # Query_time 出现即条目起点；其余字段按需提取，兼容 log_slow_extra 与老版本
+        query_time = _METRIC_QUERY_TIME.search(line)
+        if query_time:
+            self._start_entry(line, query_time)
+            return
+        time_match = _HEADER_TIME.match(line)
+        if time_match:
+            self.time_hint = time_match.group(1)
+
+    def _start_entry(self, line: str, query_time: re.Match[str]) -> None:
+        self.flush()
+        # 时间提示属于当前条目，起新条目时快照并复位
+        self.pending_time_hint = self.time_hint
+        self.time_hint = None
+        lock = _METRIC_LOCK_TIME.search(line)
+        sent = _METRIC_ROWS_SENT.search(line)
+        examined = _METRIC_ROWS_EXAMINED.search(line)
+        try:
+            self.metrics = (
+                float(query_time.group(1)),
+                float(lock.group(1)) if lock else 0.0,
+                int(sent.group(1)) if sent else 0,
+                int(examined.group(1)) if examined else 0,
+            )
+        except ValueError:
+            # 数值损坏时跳过该条目；正则可能放过 1.2.3 这类坏值
+            self.metrics = None
+            self.statement_lines = []
+            self.skipped += 1
+
+    def _consume_control(self, line: str) -> bool:
+        set_match = _SET_TIMESTAMP.match(line)
+        if set_match:
+            # SET timestamp 仅在缺少日志头时间时作兜底
+            if self.pending_time_hint is None:
+                self.pending_time_hint = set_match.group(1)
+            return True
+        if _USE_LINE.match(line):
+            # USE 终止当前条目，不进入语句本体
+            self.flush()
+            return True
+        return False
+
+    def flush(self) -> None:
+        statement = "\n".join(self.statement_lines).strip()
+        if self.metrics is not None and statement:
+            query_time, lock_time, rows_sent, rows_examined = self.metrics
+            self.entries.append(
                 SlowEntry(
                     query_time=query_time,
                     lock_time=lock_time,
                     rows_sent=rows_sent,
                     rows_examined=rows_examined,
                     statement=statement,
-                    time_hint=pending_time_hint,
+                    time_hint=self.pending_time_hint,
                 )
             )
-        metrics = None
-        statement_lines = []
-
-    for raw_line in text.splitlines():
-        line = raw_line.rstrip("\r")
-        if line.startswith("#"):
-            # Query_time 出现即条目起点；其余字段按需提取，兼容 log_slow_extra 与老版本
-            query_time = _METRIC_QUERY_TIME.search(line)
-            if query_time:
-                flush()
-                # 时间提示属于当前条目，起新条目时快照并复位
-                pending_time_hint = time_hint
-                time_hint = None
-                lock = _METRIC_LOCK_TIME.search(line)
-                sent = _METRIC_ROWS_SENT.search(line)
-                examined = _METRIC_ROWS_EXAMINED.search(line)
-                try:
-                    metrics = (
-                        float(query_time.group(1)),
-                        float(lock.group(1)) if lock else 0.0,
-                        int(sent.group(1)) if sent else 0,
-                        int(examined.group(1)) if examined else 0,
-                    )
-                except ValueError:
-                    # 数值损坏时跳过该条目；正则可能放过 1.2.3 这类坏值
-                    metrics = None
-                    statement_lines = []
-                    skipped += 1
-            else:
-                time_match = _HEADER_TIME.match(line)
-                if time_match:
-                    time_hint = time_match.group(1)
-                # 其余扩展头忽略
-            continue
-        set_match = _SET_TIMESTAMP.match(line)
-        if set_match:
-            # SET timestamp 仅在缺少日志头时间时作兜底
-            if pending_time_hint is None:
-                pending_time_hint = set_match.group(1)
-            continue
-        if _USE_LINE.match(line):
-            # USE 终止当前条目，不进入语句本体
-            flush()
-            continue
-        if line.strip() == "" and metrics is None:
-            continue
-        if line.strip() == "":
-            # 保留语句内空行
-            statement_lines.append("")
-            continue
-        statement_lines.append(line)
-    flush()
-    return entries, skipped
+        self.metrics = None
+        self.statement_lines = []
 
 
 def aggregate(entries: list[SlowEntry], *, top: int = 20) -> list[SlowAggregate]:

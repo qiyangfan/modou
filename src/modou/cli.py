@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import NoReturn
 
 import pymysql.err
 import typer
@@ -477,25 +478,46 @@ def patrol_unused_indexes(
 ) -> None:
     """Layered unused-index detection (live) plus offline redundancy judgment (snapshot)."""
     from modou.patrol.report import dumps, unused_render, unused_to_json
-    from modou.patrol.unused_indexes import (
-        PerformanceSchemaDisabledError,
-        UnusedIndexesReport,
-        collect_from_live,
-        find_redundant_from_inventory,
-        judge_unused_indexes,
-        read_index_io_counts,
-    )
+    from modou.patrol.unused_indexes import UnusedIndexesReport
 
-    report_kwargs: dict = {"observe_days": observe_days, "uptime_seconds": None}
-    inventories = []
+    inventories, params, uptime = _patrol_inventories(dsn, database, snapshot, host, port, user, password)
+    usages, redundancies = _judge_inventories(inventories, params, uptime, observe_days)
+    report = UnusedIndexesReport(
+        observe_days=observe_days, uptime_seconds=uptime, usages=usages, redundancies=redundancies
+    )
+    if report_json is not None:
+        try:
+            report_json.write_text(dumps(unused_to_json(report)), encoding="utf-8")
+        except OSError as exc:
+            _cli_fail(f"cannot write report: {exc}", exc)
+        typer.echo(f"report -> {report_json}", err=True)
+    typer.echo(unused_render(report))
+
+
+def _cli_fail(message: str, cause: Exception | None = None) -> NoReturn:
+    typer.secho(message, fg=typer.colors.RED, err=True)
+    raise typer.Exit(code=2) from cause
+
+
+def _patrol_inventories(
+    dsn: str | None,
+    database: list[str],
+    snapshot: Path | None,
+    host: str | None,
+    port: int | None,
+    user: str | None,
+    password: str | None,
+) -> tuple[list, MysqlParams | None, int | None]:
+    from modou.patrol.unused_indexes import PerformanceSchemaDisabledError, collect_from_live
 
     if dsn is not None:
         if not database:
-            typer.secho("--database is required with --dsn", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2)
+            _cli_fail("--database is required with --dsn")
         try:
             params = resolve_params(dsn, host, port, user, password, allow_prompt=True)
             uptime: int | None = None
+            last_uptime: int | None = None
+            inventories = []
             conn = params.connect()
             try:
                 for db_name in dict.fromkeys(database):
@@ -505,54 +527,43 @@ def patrol_unused_indexes(
             finally:
                 conn.close()
         except (pymysql.err.MySQLError, OSError, ValueError, PerformanceSchemaDisabledError) as exc:
-            typer.secho(f"unused-indexes failed: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
-        report_kwargs["uptime_seconds"] = last_uptime
-    elif snapshot is not None:
+            _cli_fail(f"unused-indexes failed: {exc}", exc)
+        return inventories, params, last_uptime
+    if snapshot is not None:
         try:
             snapshot_data = snapshot_from_json(snapshot.read_text(encoding="utf-8"))
         except (OSError, ValueError, KeyError, TypeError) as exc:
-            typer.secho(f"cannot load snapshot: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
-        inventories.extend(snapshot_data.databases.values())
-    else:
-        typer.secho("provide --dsn (live) or --snapshot (offline)", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=2)
+            _cli_fail(f"cannot load snapshot: {exc}", exc)
+        return list(snapshot_data.databases.values()), None, None
+    _cli_fail("provide --dsn (live) or --snapshot (offline)")
 
-    from modou.patrol.unused_indexes import IndexUsage
+
+def _judge_inventories(
+    inventories: list, params: MysqlParams | None, uptime: int | None, observe_days: int
+) -> tuple[list, list]:
+    from modou.patrol.unused_indexes import (
+        IndexUsage,
+        PerformanceSchemaDisabledError,
+        find_redundant_from_inventory,
+        judge_unused_indexes,
+        read_index_io_counts,
+    )
 
     usages: list[IndexUsage] = []
     redundancies = []
     for inventory in inventories:
-        if report_kwargs["uptime_seconds"] is not None:
+        if uptime is not None:
             try:
-                conn = params.connect()
+                conn = params.connect()  # type: ignore[union-attr]
                 try:
                     counts = read_index_io_counts(conn, inventory.name)
                 finally:
                     conn.close()
             except (pymysql.err.MySQLError, PerformanceSchemaDisabledError) as exc:
-                typer.secho(f"unused-indexes failed: {exc}", fg=typer.colors.RED, err=True)
-                raise typer.Exit(code=2) from exc
-            usages.extend(
-                judge_unused_indexes(
-                    inventory,
-                    counts,
-                    uptime_seconds=report_kwargs["uptime_seconds"],
-                    observe_days=report_kwargs["observe_days"],
-                )
-            )
+                _cli_fail(f"unused-indexes failed: {exc}", exc)
+            usages.extend(judge_unused_indexes(inventory, counts, uptime_seconds=uptime, observe_days=observe_days))
         redundancies.extend(find_redundant_from_inventory(inventory))
-
-    report = UnusedIndexesReport(**report_kwargs, usages=usages, redundancies=redundancies)
-    if report_json is not None:
-        try:
-            report_json.write_text(dumps(unused_to_json(report)), encoding="utf-8")
-        except OSError as exc:
-            typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
-        typer.echo(f"report -> {report_json}", err=True)
-    typer.echo(unused_render(report))
+    return usages, redundancies
 
 
 @patrol_app.command("summarize")

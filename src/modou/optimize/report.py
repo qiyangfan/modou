@@ -36,10 +36,8 @@ def render_text(report: dict) -> str:
     """生成中文优化报告，按库列出语句、发现、建议状态与副作用。"""
     lines: list[str] = ["墨斗优化报告", "＝" * 40]
 
-    for error in report.get("env_errors", []):
-        lines.append(f"环境/输入错误：{error}")
-    for error in report.get("input_errors", []):
-        lines.append(f"输入错误：{error}")
+    lines.extend(f"环境/输入错误：{error}" for error in report.get("env_errors", []))
+    lines.extend(f"输入错误：{error}" for error in report.get("input_errors", []))
 
     advisor = report.get("advisor", {})
     if not advisor.get("configured", False):
@@ -84,8 +82,7 @@ def _render_statements(lines: list[str], statements: list[dict]) -> None:
         cost_text = "不可得" if cost is None else f"{cost:.2f}"
         lines.append(f"  SQL：{_one_line(statement['sql'])}")
         lines.append(f"  基线代价：{cost_text}")
-        for finding in statement.get("findings", []):
-            lines.append(f"  [发现] {finding['message']}")
+        lines.extend(f"  [发现] {finding['message']}" for finding in statement.get("findings", []))
         suggestions = statement.get("suggestions", [])
         if not suggestions:
             lines.append("  （无建议）")
@@ -102,8 +99,9 @@ def _render_statements(lines: list[str], statements: list[dict]) -> None:
                 reason = suggestion.get("reason") or "原因未说明"
                 lines.append(f"  [未验证]（{source_label}）{_one_line(suggestion['content'])}")
                 lines.append(f"      原因：{reason}")
-            for note in suggestion.get("side_effects", []):
-                lines.append(f"      [附注·{note['kind']}] {note['message']}")
+            lines.extend(
+                f"      [附注·{note['kind']}] {note['message']}" for note in suggestion.get("side_effects", [])
+            )
 
 
 def dumps_json(report: dict) -> str:

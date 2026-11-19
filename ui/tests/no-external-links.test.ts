@@ -29,7 +29,10 @@ describe("zero external links in dist", () => {
       const match = EXTERNAL_URL.exec(content);
       // 允许出现在注释中的许可证 URL 之外的一切外链都必须消灭
       const stripped = content.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, "");
-      expect(EXTERNAL_URL.test(stripped), `${file} references ${match?.[0]}`).toBe(false);
+      expect(
+        EXTERNAL_URL.test(stripped),
+        `${file} references ${match?.[0]}`,
+      ).toBe(false);
     }
   });
 });

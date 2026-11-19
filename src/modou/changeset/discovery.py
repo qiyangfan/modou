@@ -64,20 +64,35 @@ def discover_changeset(directory: Path, *, allow_legacy_names: bool = False) -> 
         return result
 
     declared = _parse_manifest(directory, result.errors)
+    sql_files = _collect_sql_files(directory, result.warnings)
+    _check_manifest_coverage(sql_files, declared, result.errors)
+    numbered, legacy, seq_by_name = _build_change_files(directory, sql_files, allow_legacy_names, result)
+    _check_duplicate_sequences(seq_by_name, result.errors)
+    numbered.sort(key=lambda item: item.seq)
+    _check_sequence_gaps(numbered, result.warnings)
+
+    result.items = numbered + sorted(legacy, key=lambda item: item.filename)
+    return result
+
+
+def _collect_sql_files(directory: Path, warnings: list[str]) -> list[str]:
     sql_files = sorted(p.name for p in directory.glob("*.sql"))
     nested_sql = [str(p.relative_to(directory)) for p in directory.rglob("*.sql") if p.parent != directory]
     if nested_sql:
-        result.warnings.append(
+        warnings.append(
             f"subdirectory contains .sql files that are NOT part of the changeset: {', '.join(sorted(nested_sql))}"
         )
+    return sql_files
 
-    undeclared = sorted(set(sql_files) - declared)
-    for name in undeclared:
-        result.errors.append(f"file not declared in {MANIFEST_NAME}: {name}")
-    missing = sorted(declared - set(sql_files))
-    for name in missing:
-        result.errors.append(f"manifest declares missing file: {name}")
 
+def _check_manifest_coverage(sql_files: list[str], declared: set[str], errors: list[str]) -> None:
+    errors.extend(f"file not declared in {MANIFEST_NAME}: {name}" for name in sorted(set(sql_files) - declared))
+    errors.extend(f"manifest declares missing file: {name}" for name in sorted(declared - set(sql_files)))
+
+
+def _build_change_files(
+    directory: Path, sql_files: list[str], allow_legacy_names: bool, result: DiscoveryResult
+) -> tuple[list[ChangeFile], list[ChangeFile], dict[str, int]]:
     numbered: list[ChangeFile] = []
     legacy: list[ChangeFile] = []
     seq_by_name: dict[str, int] = {}
@@ -96,18 +111,19 @@ def discover_changeset(directory: Path, *, allow_legacy_names: bool = False) -> 
         seq = int(match.group("seq"))
         seq_by_name[name] = seq
         numbered.append(ChangeFile(directory / name, name, seq=seq, description=match.group("desc")))
+    return numbered, legacy, seq_by_name
 
+
+def _check_duplicate_sequences(seq_by_name: dict[str, int], errors: list[str]) -> None:
     seq_to_names: dict[int, list[str]] = {}
     for name, seq in seq_by_name.items():
         seq_to_names.setdefault(seq, []).append(name)
     for seq, names in sorted(seq_to_names.items()):
         if len(names) > 1:
-            result.errors.append(f"duplicate sequence number {seq}: {', '.join(sorted(names))}")
+            errors.append(f"duplicate sequence number {seq}: {', '.join(sorted(names))}")
 
-    numbered.sort(key=lambda item: item.seq)
+
+def _check_sequence_gaps(numbered: list[ChangeFile], warnings: list[str]) -> None:
     for prev, curr in itertools.pairwise(item.seq for item in numbered):
         if curr - prev > 1:
-            result.warnings.append(f"sequence gap: {prev} -> {curr} (missing {prev + 1})")
-
-    result.items = numbered + sorted(legacy, key=lambda item: item.filename)
-    return result
+            warnings.append(f"sequence gap: {prev} -> {curr} (missing {prev + 1})")

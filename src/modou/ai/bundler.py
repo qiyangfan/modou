@@ -34,7 +34,7 @@ def bundle_units(
         groups.setdefault(unit.database, []).append(unit)
 
     batches: list[list[StatementUnit]] = []
-    for _database, group in groups.items():
+    for group in groups.values():
         current: list[StatementUnit] = []
         current_chars = 0
         for unit in group:

@@ -111,7 +111,7 @@ def test_missing_execution_table_not_created() -> None:
 
 
 def test_wrong_execution_index_column_order() -> None:
-    common = dict(columns=[column("id"), column("a", ordinal=2), column("b", ordinal=3)])
+    common = {"columns": [column("id"), column("a", ordinal=2), column("b", ordinal=3)]}
     b = db(tables={"t1": table("t1", **common)})
     e = db(tables={"t1": table("t1", **common, indexes=[index("idx_ab", ["a", "b"])])})
     a = db(tables={"t1": table("t1", **common, indexes=[index("idx_ab", ["b", "a"])])})
@@ -341,7 +341,7 @@ def test_multi_database_grouping() -> None:
     )
     a0 = db("db0", tables={"t_users": table("t_users", columns=[column("id")])})
 
-    common = dict(columns=[column("id"), column("a", ordinal=2), column("b", ordinal=3)])
+    common = {"columns": [column("id"), column("a", ordinal=2), column("b", ordinal=3)]}
     b1 = db("db1", tables={"t1": table("t1", **common)})
     e1 = db("db1", tables={"t1": table("t1", **common, indexes=[index("idx_ab", ["a", "b"])])})
     a1 = db("db1", tables={"t1": table("t1", **common, indexes=[index("idx_ab", ["b", "a"])])})

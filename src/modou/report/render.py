@@ -97,42 +97,21 @@ def render_text(report: VerifyReport) -> str:
     """生成中文人读报告，按库分组列出结论与差异。"""
     lines: list[str] = ["墨斗验收报告", "＝" * 40]
 
-    for error in report.env_errors:
-        lines.append(f"环境/输入错误：{error}")
+    lines.extend(f"环境/输入错误：{error}" for error in report.env_errors)
     if report.replay_error is not None:
-        err = report.replay_error
-        lines.append(f"回放失败：语句 #{err['statement_index']}（error {err['error_code']}）：{err['error_message']}")
-        lines.append(f"失败语句：{_one_line(err['sql'])}")
-
+        _append_replay_error(report.replay_error, lines)
     if report.pack_warnings:
-        lines.append("")
-        lines.append("── 打包预警（不影响验收结论）──")
-        for w in report.pack_warnings:
-            lines.append(f"  [{w.kind}] {w.source_file} #{w.statement_index}：{w.message}")
+        _append_pack_warnings(report, lines)
 
     if report.databases:
         total_by_kind = {kind: report.conclusion_count(kind) for kind in KIND_LABELS}
         for db_name, conclusions in report.databases.items():
             lines.append("")
-            if len(report.databases) > 1:
-                # 多库时只在末尾汇总计数，避免把总数误读成单库计数
-                lines.append(f"── 库 {db_name} ──")
-            else:
-                counts = " · ".join(f"{label} {total_by_kind[kind]}" for kind, label in KIND_LABELS.items())
-                lines.append(f"── 库 {db_name}（{counts}）──")
-            for c in conclusions:
-                dims = "、".join(c.dimension_labels) if c.dimensions else "-"
-                type_label = OBJECT_TYPE_LABELS.get(c.object_type, c.object_type)
-                lines.append(f"  [{KIND_LABELS[c.kind]}] {type_label} `{c.object_name}`（{dims}）")
-                for d in c.details:
-                    expected = _one_line(d.expected)
-                    actual = _one_line(d.actual)
-                    lines.append(f"      {d.path}: 期望 {expected}")
-                    lines.append(f"      {d.path}: 实际 {actual}")
+            _append_database_header(report, db_name, total_by_kind, lines)
+            for conclusion in conclusions:
+                _append_conclusion(conclusion, lines)
         if len(report.databases) > 1:
-            counts = " · ".join(f"{label} {total_by_kind[kind]}" for kind, label in KIND_LABELS.items())
-            lines.append("")
-            lines.append(f"── 汇总（{counts}）──")
+            _append_summary(total_by_kind, lines)
     elif not report.env_errors and report.replay_error is None:
         lines.append("")
         lines.append("全部一致：期望态与实际态逐对象逐维度相等。")
@@ -140,6 +119,46 @@ def render_text(report: VerifyReport) -> str:
     lines.append("")
     lines.append(f"退出码：{report.exit_code}（0=全部一致，1=存在差异，2=环境或输入错误）")
     return "\n".join(lines)
+
+
+def _append_replay_error(err: dict, lines: list[str]) -> None:
+    lines.append(f"回放失败：语句 #{err['statement_index']}（error {err['error_code']}）：{err['error_message']}")
+    lines.append(f"失败语句：{_one_line(err['sql'])}")
+
+
+def _append_pack_warnings(report: VerifyReport, lines: list[str]) -> None:
+    lines.append("")
+    lines.append("── 打包预警（不影响验收结论）──")
+    lines.extend(
+        f"  [{warning.kind}] {warning.source_file} #{warning.statement_index}：{warning.message}"
+        for warning in report.pack_warnings
+    )
+
+
+def _append_database_header(
+    report: VerifyReport, db_name: str, total_by_kind: dict[str, int], lines: list[str]
+) -> None:
+    if len(report.databases) > 1:
+        # 多库时只在末尾汇总计数，避免把总数误读成单库计数
+        lines.append(f"── 库 {db_name} ──")
+        return
+    counts = " · ".join(f"{label} {total_by_kind[kind]}" for kind, label in KIND_LABELS.items())
+    lines.append(f"── 库 {db_name}（{counts}）──")
+
+
+def _append_conclusion(conclusion: ObjectConclusion, lines: list[str]) -> None:
+    dims = "、".join(conclusion.dimension_labels) if conclusion.dimensions else "-"
+    type_label = OBJECT_TYPE_LABELS.get(conclusion.object_type, conclusion.object_type)
+    lines.append(f"  [{KIND_LABELS[conclusion.kind]}] {type_label} `{conclusion.object_name}`（{dims}）")
+    for detail in conclusion.details:
+        lines.append(f"      {detail.path}: 期望 {_one_line(detail.expected)}")
+        lines.append(f"      {detail.path}: 实际 {_one_line(detail.actual)}")
+
+
+def _append_summary(total_by_kind: dict[str, int], lines: list[str]) -> None:
+    counts = " · ".join(f"{label} {total_by_kind[kind]}" for kind, label in KIND_LABELS.items())
+    lines.append("")
+    lines.append(f"── 汇总（{counts}）──")
 
 
 def _one_line(text: str, limit: int = 160) -> str:

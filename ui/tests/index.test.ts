@@ -23,7 +23,11 @@ describe("index entry", () => {
 
   it("renders sidebar items and first report from object-shaped list", async () => {
     stubFetchBodies([
-      { reports: [{ id: "/tmp/r.json", kind: "lint", version: 1, source: "r.json" }] },
+      {
+        reports: [
+          { id: "/tmp/r.json", kind: "lint", version: 1, source: "r.json" },
+        ],
+      },
       {
         id: "/tmp/r.json",
         kind: "lint",
@@ -37,6 +41,16 @@ describe("index entry", () => {
     const app = document.getElementById("app")!;
     expect(app.querySelectorAll(".report-item").length).toBe(1);
     expect(app.querySelector("main")!.textContent).toContain("命中 0 条");
+  });
+
+  it("null body degrades to load-error message, not a crash", async () => {
+    stubFetchBodies([null]);
+    await import("../src/index");
+    await new Promise((r) => setTimeout(r, 0));
+    const app = document.getElementById("app")!;
+    expect(app.querySelector("main")!.textContent).toContain(
+      "无法加载报告数据",
+    );
   });
 
   it("malformed list shape degrades to empty state, not a crash", async () => {

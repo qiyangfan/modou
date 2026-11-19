@@ -15,14 +15,14 @@ from fastmcp.exceptions import ToolError
 from modou import __version__
 from modou.ai.client import config_from_env
 from modou.changeset.pack import ChangesetValidationError, pack_changeset
-from modou.diff.pipeline import VerifyInputError, run_verify
+from modou.diff.pipeline import VerifyInputError, VerifyOutcome, run_verify
 from modou.optimize.pipeline import run_optimize
 from modou.params import PasswordUnavailableError, resolve_params
 from modou.replay.splitter import split_statements
 from modou.report.opinions import AiOpinion
 from modou.server.surface_map import EVIDENCE_PRIMITIVES, EXCLUDED_COMMANDS, cli_command_map
 from modou.snapshot.capture import capture_to_file
-from modou.snapshot.model import snapshot_from_json
+from modou.snapshot.model import Snapshot, snapshot_from_json
 
 
 def build_mcp_server() -> FastMCP:
@@ -48,7 +48,19 @@ def _register_tools(mcp: FastMCP) -> None:
     from modou.patrol.unused_indexes import DEFAULT_OBSERVE_DAYS
 
     command_help = cli_command_map()
+    _register_pack(mcp, command_help)
+    _register_verify(mcp, command_help)
+    _register_snapshot_capture(mcp, command_help)
+    _register_optimize(mcp, command_help)
+    _register_lint(mcp, command_help)
+    _register_patrol_drift(mcp, command_help)
+    _register_patrol_unused_indexes(mcp, command_help, DEFAULT_OBSERVE_DAYS)
+    _register_patrol_slowlog(mcp, command_help)
+    _register_patrol_summarize(mcp, command_help)
+    _register_version(mcp, command_help)
 
+
+def _register_pack(mcp: FastMCP, command_help: dict[str, str]) -> None:
     @mcp.tool(
         name="pack",
         description=command_help["pack"],
@@ -92,6 +104,8 @@ def _register_tools(mcp: FastMCP) -> None:
             "warnings": warnings_payload,
         }
 
+
+def _register_verify(mcp: FastMCP, command_help: dict[str, str]) -> None:
     @mcp.tool(
         name="verify",
         description=command_help["verify"],
@@ -128,26 +142,38 @@ def _register_tools(mcp: FastMCP) -> None:
         except VerifyInputError as exc:
             raise ToolError(f"changeset validation failed: {'; '.join(exc.errors)}") from exc
         # AI 归因可选：未配置不联网，观点不影响退出码
-        import os
-
         from modou.report.opinions import attach_ai_opinions
 
-        ai_config = config_from_env(dict(os.environ))
-        opinions: list[AiOpinion] = []
-        if ai_config is not None:
-            from modou.ai.lane_verify import attribute_findings
-
-            opinions = attribute_findings(
-                outcome.report_json,
-                Path(changeset_dir),
-                baseline_snapshot,
-                config=ai_config,
-                default_database=default_database,
-                allow_legacy_names=allow_legacy_names,
-            )
+        opinions = _verify_opinions(outcome, changeset_dir, baseline_snapshot, default_database, allow_legacy_names)
         # 报告与退出码是结论数据，不转成工具错误
         return {"exit_code": outcome.exit_code, "report": attach_ai_opinions(outcome.report_json, opinions)}
 
+
+def _verify_opinions(
+    outcome: VerifyOutcome,
+    changeset_dir: str,
+    baseline_snapshot: Snapshot,
+    default_database: str | None,
+    allow_legacy_names: bool,
+) -> list[AiOpinion]:
+    import os
+
+    ai_config = config_from_env(dict(os.environ))
+    if ai_config is None:
+        return []
+    from modou.ai.lane_verify import attribute_findings
+
+    return attribute_findings(
+        outcome.report_json,
+        Path(changeset_dir),
+        baseline_snapshot,
+        config=ai_config,
+        default_database=default_database,
+        allow_legacy_names=allow_legacy_names,
+    )
+
+
+def _register_snapshot_capture(mcp: FastMCP, command_help: dict[str, str]) -> None:
     @mcp.tool(
         name="snapshot_capture",
         description=command_help["snapshot_capture"],
@@ -180,6 +206,8 @@ def _register_tools(mcp: FastMCP) -> None:
         # summary 与 CLI --report-json 使用同一内核输出。
         return {"exit_code": 0, "output": str(output), "summary": snapshot_summary(snapshot)}
 
+
+def _register_optimize(mcp: FastMCP, command_help: dict[str, str]) -> None:
     @mcp.tool(
         name="optimize",
         description=command_help["optimize"],
@@ -213,6 +241,8 @@ def _register_tools(mcp: FastMCP) -> None:
         )
         return {"exit_code": outcome.exit_code, "report": outcome.report_json}
 
+
+def _register_lint(mcp: FastMCP, command_help: dict[str, str]) -> None:
     @mcp.tool(
         name="lint",
         description=command_help["lint"],
@@ -245,17 +275,22 @@ def _register_tools(mcp: FastMCP) -> None:
         except (OSError, UnicodeDecodeError) as exc:
             raise ToolError(f"lint failed: {exc}") from exc
 
-        # AI 残留评审可选：未配置不联网，观点不影响退出码
-        ai_config = config_from_env(dict(os.environ))
-        opinions: list[AiOpinion] = []
-        if ai_config is not None:
-            from modou.ai.bundler import StatementUnit
-            from modou.ai.lane_lint import review_residual
-
-            units = [StatementUnit(file=r.file, line=r.line, sql=r.sql) for r in result.residuals]
-            opinions = review_residual(units, result.hits, ai_config)
+        opinions = _lint_opinions(result, config_from_env(dict(os.environ)))
         return {"exit_code": result.exit_code, "report": attach_ai_opinions(result_to_json(result), opinions)}
 
+
+def _lint_opinions(result: Any, ai_config: Any) -> list[AiOpinion]:
+    # AI 残留评审可选：未配置不联网，观点不影响退出码
+    if ai_config is None:
+        return []
+    from modou.ai.bundler import StatementUnit
+    from modou.ai.lane_lint import review_residual
+
+    units = [StatementUnit(file=r.file, line=r.line, sql=r.sql) for r in result.residuals]
+    return review_residual(units, result.hits, ai_config)
+
+
+def _register_patrol_drift(mcp: FastMCP, command_help: dict[str, str]) -> None:
     @mcp.tool(
         name="patrol_drift",
         description=command_help["patrol_drift"],
@@ -299,6 +334,8 @@ def _register_tools(mcp: FastMCP) -> None:
         report = drift_between_snapshots(baseline_snapshot.databases, current_snapshot.databases)
         return {"exit_code": report.exit_code, "report": drift_to_json(report)}
 
+
+def _register_patrol_unused_indexes(mcp: FastMCP, command_help: dict[str, str], default_observe_days: int) -> None:
     @mcp.tool(
         name="patrol_unused_indexes",
         description=command_help["patrol_unused_indexes"],
@@ -307,7 +344,7 @@ def _register_tools(mcp: FastMCP) -> None:
         dsn: str | None = None,
         database: list[str] | None = None,
         snapshot: str | None = None,
-        observe_days: int = DEFAULT_OBSERVE_DAYS,
+        observe_days: int = default_observe_days,
         host: str | None = None,
         port: int | None = None,
         user: str | None = None,
@@ -315,54 +352,18 @@ def _register_tools(mcp: FastMCP) -> None:
     ) -> dict[str, Any]:
         """Layered unused-index detection (live) plus offline redundancy judgment (snapshot)."""
         from modou.patrol.report import unused_to_json
-        from modou.patrol.unused_indexes import (
-            PerformanceSchemaDisabledError,
-            UnusedIndexesReport,
-            collect_from_live,
-            find_redundant_from_inventory,
-            judge_unused_indexes,
-            read_index_io_counts,
-        )
+        from modou.patrol.unused_indexes import UnusedIndexesReport
 
         if observe_days < 1:
             # 0 天观察窗会让「确认未用」失去门槛
             raise ToolError("observe_days must be >= 1")
-
-        usages: list = []
-        redundancies: list = []
-        uptime: int | None = None
         if dsn is not None:
-            if not database:
-                raise ToolError("database list is required with dsn")
-            try:
-                params = resolve_params(dsn, host, port, user, password, allow_prompt=False)
-                conn = params.connect()
-            except (PasswordUnavailableError, ValueError) as exc:
-                raise ToolError(str(exc)) from exc
-            except Exception as exc:
-                # 建连失败必须转成工具错误，否则会被 mask 成无信息文案
-                raise ToolError(f"unused-indexes failed: {exc}") from exc
-            try:
-                for db_name in dict.fromkeys(database):
-                    inventory, db_uptime = collect_from_live(conn, db_name)
-                    uptime = db_uptime
-                    counts = read_index_io_counts(conn, db_name)
-                    usages.extend(
-                        judge_unused_indexes(inventory, counts, uptime_seconds=db_uptime, observe_days=observe_days)
-                    )
-            except PerformanceSchemaDisabledError as exc:
-                raise ToolError(str(exc)) from exc
-            except Exception as exc:
-                raise ToolError(f"unused-indexes failed: {exc}") from exc
-            finally:
-                conn.close()
+            usages, uptime = _live_usages(dsn, database, host, port, user, password, observe_days)
+            redundancies: list = []
         elif snapshot is not None:
-            try:
-                snapshot_data = snapshot_from_json(Path(snapshot).read_text(encoding="utf-8"))
-            except (OSError, ValueError, KeyError, TypeError) as exc:
-                raise ToolError(f"cannot load snapshot: {exc}") from exc
-            for inventory in snapshot_data.databases.values():
-                redundancies.extend(find_redundant_from_inventory(inventory))
+            usages = []
+            uptime = None
+            redundancies = _snapshot_redundancies(snapshot)
         else:
             raise ToolError("provide dsn (live) or snapshot (offline)")
         report = UnusedIndexesReport(
@@ -370,6 +371,64 @@ def _register_tools(mcp: FastMCP) -> None:
         )
         return {"exit_code": 0, "report": unused_to_json(report)}
 
+
+def _live_usages(
+    dsn: str,
+    database: list[str] | None,
+    host: str | None,
+    port: int | None,
+    user: str | None,
+    password: str | None,
+    observe_days: int,
+) -> tuple[list, int | None]:
+    from modou.patrol.unused_indexes import (
+        PerformanceSchemaDisabledError,
+        collect_from_live,
+        judge_unused_indexes,
+        read_index_io_counts,
+    )
+
+    if not database:
+        raise ToolError("database list is required with dsn")
+    try:
+        params = resolve_params(dsn, host, port, user, password, allow_prompt=False)
+        conn = params.connect()
+    except (PasswordUnavailableError, ValueError) as exc:
+        raise ToolError(str(exc)) from exc
+    except Exception as exc:
+        # 建连失败必须转成工具错误，否则会被 mask 成无信息文案
+        raise ToolError(f"unused-indexes failed: {exc}") from exc
+    usages: list = []
+    uptime: int | None = None
+    try:
+        for db_name in dict.fromkeys(database):
+            inventory, db_uptime = collect_from_live(conn, db_name)
+            uptime = db_uptime
+            counts = read_index_io_counts(conn, db_name)
+            usages.extend(judge_unused_indexes(inventory, counts, uptime_seconds=db_uptime, observe_days=observe_days))
+    except PerformanceSchemaDisabledError as exc:
+        raise ToolError(str(exc)) from exc
+    except Exception as exc:
+        raise ToolError(f"unused-indexes failed: {exc}") from exc
+    finally:
+        conn.close()
+    return usages, uptime
+
+
+def _snapshot_redundancies(snapshot: str) -> list:
+    from modou.patrol.unused_indexes import find_redundant_from_inventory
+
+    try:
+        snapshot_data = snapshot_from_json(Path(snapshot).read_text(encoding="utf-8"))
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise ToolError(f"cannot load snapshot: {exc}") from exc
+    redundancies: list = []
+    for inventory in snapshot_data.databases.values():
+        redundancies.extend(find_redundant_from_inventory(inventory))
+    return redundancies
+
+
+def _register_patrol_slowlog(mcp: FastMCP, command_help: dict[str, str]) -> None:
     @mcp.tool(
         name="patrol_slowlog",
         description=command_help["patrol_slowlog"],
@@ -390,6 +449,8 @@ def _register_tools(mcp: FastMCP) -> None:
             raise ToolError(f"cannot read slowlog: {exc}") from exc
         return {"exit_code": 0, "report": slowlog_to_json(report)}
 
+
+def _register_patrol_summarize(mcp: FastMCP, command_help: dict[str, str]) -> None:
     @mcp.tool(
         name="patrol_summarize",
         description=command_help["patrol_summarize"],
@@ -429,6 +490,8 @@ def _register_tools(mcp: FastMCP) -> None:
             opinions = narrativize(report, config=ai_config)
         return {"exit_code": int(report["exit_code"]), "report": attach_ai_opinions(report, opinions)}
 
+
+def _register_version(mcp: FastMCP, command_help: dict[str, str]) -> None:
     @mcp.tool(
         name="version",
         description=command_help["version"],

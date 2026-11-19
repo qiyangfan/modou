@@ -114,7 +114,7 @@ def summarize_reports(
         "report_version": REPORT_VERSION,
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "exit_code": summary_exit,
-        "inputs": inputs if inputs is not None else {signal: None for signal in _KIND_BY_SIGNAL},
+        "inputs": inputs if inputs is not None else dict.fromkeys(_KIND_BY_SIGNAL),
         "signals": signals,
     }
 

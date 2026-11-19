@@ -166,8 +166,8 @@ def snapshot_from_json(text: str) -> Snapshot:
         )
     meta = SnapshotMeta(**_require_dict(raw["meta"], "meta"))
     databases: dict[str, DatabaseInventory] = {}
-    for db_name, db_raw in _require_dict(raw["databases"], "databases").items():
-        db_raw = _require_dict(db_raw, f"databases[{db_name!r}]")
+    for db_name, db_value in _require_dict(raw["databases"], "databases").items():
+        db_raw = _require_dict(db_value, f"databases[{db_name!r}]")
         tables: dict[str, TableDef] = {}
         for t_name, t_value in _require_dict(db_raw["tables"], f"databases[{db_name!r}].tables").items():
             t_raw = _require_dict(t_value, f"databases[{db_name!r}].tables[{t_name!r}]")

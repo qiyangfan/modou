@@ -11,8 +11,7 @@ from modou.optimize.candidates import IndexCandidate
 from modou.optimize.pipeline import OptimizeOutcome, run_optimize
 from modou.snapshot.capture import capture_to_file
 from tests.conftest import unique_db
-
-from ..optimize.conftest import make_snapshot
+from tests.optimize.conftest import make_snapshot
 
 SETUP_ROWS = 2000
 

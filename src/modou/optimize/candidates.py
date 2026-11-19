@@ -227,28 +227,8 @@ class _PredicateCollector:
     def build_candidates(self, main_table: exp.Table | None) -> list[IndexCandidate]:
         candidates: list[IndexCandidate] = []
         seen: set[tuple[str | None, str, tuple[str, ...]]] = set()
-        targets = sorted(
-            {*self._equality.keys(), *self._range.keys(), *([self._order_columns[:2]] if self._order_columns else [])},
-            key=lambda t: (t[0] or "", t[1]),
-        )
-        if main_table is None and self._analysis.table == "?":
-            # 派生表或无表形态的主表键 "?" 是哨兵，不产候选
-            sentinel = _main_table_key(self._analysis)
-            targets = [t for t in targets if t != sentinel]
-        for target in targets:
-            columns: list[str] = []
-            for col in self._equality.get(target, []):
-                if col not in columns:
-                    columns.append(col)
-            range_columns = self._range.get(target, [])
-            if range_columns:
-                if range_columns[0] not in columns:
-                    columns.append(range_columns[0])
-            elif self._order_columns is not None and self._order_columns[:2] == target:
-                for col in self._order_columns[2]:
-                    if col not in columns:
-                        columns.append(col)
-            columns = columns[:MAX_CANDIDATE_COLUMNS]
+        for target in self._candidate_targets(main_table):
+            columns = self._columns_for_target(target)
             if not columns:
                 continue
             key = (target[0], target[1], tuple(columns))
@@ -258,6 +238,32 @@ class _PredicateCollector:
             reason = _candidate_reason(self._equality.get(target, []), self._range.get(target, []))
             candidates.append(IndexCandidate(database=target[0], table=target[1], columns=columns, reason=reason))
         return candidates[:MAX_CANDIDATES_PER_STATEMENT]
+
+    def _candidate_targets(self, main_table: exp.Table | None) -> list[tuple[str | None, str]]:
+        targets = sorted(
+            {*self._equality.keys(), *self._range.keys(), *([self._order_columns[:2]] if self._order_columns else [])},
+            key=lambda t: (t[0] or "", t[1]),
+        )
+        if main_table is None and self._analysis.table == "?":
+            # 派生表或无表形态的主表键 "?" 是哨兵，不产候选
+            sentinel = _main_table_key(self._analysis)
+            targets = [t for t in targets if t != sentinel]
+        return targets
+
+    def _columns_for_target(self, target: tuple[str | None, str]) -> list[str]:
+        columns: list[str] = []
+        for col in self._equality.get(target, []):
+            if col not in columns:
+                columns.append(col)
+        range_columns = self._range.get(target, [])
+        if range_columns:
+            if range_columns[0] not in columns:
+                columns.append(range_columns[0])
+        elif self._order_columns is not None and self._order_columns[:2] == target:
+            for col in self._order_columns[2]:
+                if col not in columns:
+                    columns.append(col)
+        return columns[:MAX_CANDIDATE_COLUMNS]
 
     def _resolve_target(self, column: exp.Column) -> tuple[str | None, str] | None:
         qualifier = column.table
@@ -270,8 +276,7 @@ class _PredicateCollector:
                 return None
             return target
         # 无限定列：归属主表
-        main = _main_table_key(self._analysis)
-        return main
+        return _main_table_key(self._analysis)
 
 
 def _flatten_and(condition: exp.Expression) -> list[exp.Expression]:

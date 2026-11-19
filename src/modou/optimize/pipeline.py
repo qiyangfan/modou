@@ -85,46 +85,53 @@ def validate_inputs(
     if not statements:
         raise OptimizeInputError(["no statements to optimize"])
     errors.extend(replay_env.unsupported_version_errors(baseline.meta))
+    errors.extend(_sample_errors(baseline))
 
+    analyses: list[StatementAnalysis] = []
+    for position, sql in enumerate(statements, start=1):
+        statement_errors, analysis = _analyze_one(sql, position, baseline, default_database)
+        errors.extend(statement_errors)
+        if analysis is not None and not errors:
+            analyses.append(analysis)
+    if errors:
+        raise OptimizeInputError(errors)
+    return analyses
+
+
+def _sample_errors(baseline: Snapshot) -> list[str]:
     has_sample = any(
         table.sample is not None and table.sample.rows
         for inventory in baseline.databases.values()
         for table in inventory.tables.values()
     )
-    if not has_sample:
-        errors.append(
-            "baseline snapshot has no sampled data (optimize needs row samples for cost comparison); "
-            "re-capture with --sample-rows"
-        )
+    if has_sample:
+        return []
+    return [
+        "baseline snapshot has no sampled data (optimize needs row samples for cost comparison); "
+        "re-capture with --sample-rows"
+    ]
 
-    analyses: list[StatementAnalysis] = []
-    for position, sql in enumerate(statements, start=1):
-        try:
-            analysis = analyze_statement(sql, default_database)
-        except (StatementTypeError, ValueError) as exc:
-            errors.append(f"statement #{position}: {exc}")
-            continue
-        if analysis.database is None:
+
+def _analyze_one(
+    sql: str, position: int, baseline: Snapshot, default_database: str | None
+) -> tuple[list[str], StatementAnalysis | None]:
+    try:
+        analysis = analyze_statement(sql, default_database)
+    except (StatementTypeError, ValueError) as exc:
+        return [f"statement #{position}: {exc}"], None
+    if analysis.database is None:
+        return [f"statement #{position}: statement has no qualified database and no --default-database was given"], None
+    if analysis.database not in baseline.databases:
+        return [f"statement #{position}: database {analysis.database!r} is not in the snapshot"], None
+    errors = []
+    for ref_db, ref_table in analysis.referenced_tables:
+        inventory = baseline.databases.get(ref_db or analysis.database)
+        if inventory is None or ref_table not in inventory.tables:
             errors.append(
-                f"statement #{position}: statement has no qualified database and no --default-database was given"
+                f"statement #{position}: referenced table {ref_db or analysis.database}.{ref_table} "
+                "is not in the snapshot tables (re-capture including it)"
             )
-            continue
-        if analysis.database not in baseline.databases:
-            errors.append(f"statement #{position}: database {analysis.database!r} is not in the snapshot")
-            continue
-        for ref_db, ref_table in analysis.referenced_tables:
-            inventory = baseline.databases.get(ref_db or analysis.database)
-            if inventory is None or ref_table not in inventory.tables:
-                errors.append(
-                    f"statement #{position}: referenced table {ref_db or analysis.database}.{ref_table} "
-                    "is not in the snapshot tables (re-capture including it)"
-                )
-        if errors:
-            continue
-        analyses.append(analysis)
-    if errors:
-        raise OptimizeInputError(errors)
-    return analyses
+    return errors, analysis
 
 
 def resolve_candidates(

@@ -67,6 +67,5 @@ def render_opinions_section(opinions: Sequence[AiOpinion]) -> str:
             lines.append(f"  [{o.lane}] {o.subject}：AI 分析降级（{o.degraded_reason}）")
             continue
         lines.append(f"  [{o.lane}] {o.subject}（来源 ai:{o.model}·未实证）")
-        for text_line in o.opinion.splitlines() or [""]:
-            lines.append(f"      {text_line}")
+        lines.extend(f"      {text_line}" for text_line in o.opinion.splitlines() or [""])
     return "\n".join(lines)

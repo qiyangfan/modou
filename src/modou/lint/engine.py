@@ -172,8 +172,7 @@ def _judge_statement(
     for rule in rules:
         if rule.rule_id in disabled_rules:
             continue
-        for message in rule.check(tree, thresholds):
-            findings.append((rule, message))
+        findings.extend((rule, message) for message in rule.check(tree, thresholds))
     return findings, True, None
 
 

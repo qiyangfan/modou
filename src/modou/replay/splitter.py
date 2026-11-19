@@ -29,75 +29,23 @@ def _scan(sql_text: str) -> tuple[list[str], str]:
     i = 0
     n = len(sql_text)
 
-    def buffer_is_statement_start() -> bool:
-        """缓冲区只含空白/注释时，才把行首词识别为 DELIMITER 指令。"""
-        return not buffer_has_code
-
     while i < n:
-        # DELIMITER 只在语句起点识别
-        if (
-            buffer_is_statement_start()
-            and _at_line_start(buffer)
-            and sql_text[i : i + len(_DELIMITER_KEYWORD)].lower() == _DELIMITER_KEYWORD
-            and _is_word_boundary_before(sql_text, i)
-        ):
-            j = i + len(_DELIMITER_KEYWORD)
-            while j < n and sql_text[j] in " \t":
-                j += 1
-            k = j
-            while k < n and sql_text[k] not in "\r\n":
-                k += 1
-            token = sql_text[j:k].strip()
+        if _is_delimiter_directive(sql_text, buffer, buffer_has_code, i):
+            i, token = _consume_delimiter(sql_text, i, n)
             if token:
                 delimiter = token
             buffer = []
             buffer_has_code = False
-            i = k
             continue
 
-        ch = sql_text[i]
-
-        # 字符串与反引号
-        if ch == "'":
-            j = _skip_single_quoted(sql_text, i)
-            buffer.append(sql_text[i:j])
-            buffer_has_code = True
-            i = j
-            continue
-        if ch == '"':
-            j = _skip_double_quoted(sql_text, i)
-            buffer.append(sql_text[i:j])
-            buffer_has_code = True
-            i = j
-            continue
-        if ch == "`":
-            j = _skip_backquoted(sql_text, i)
-            buffer.append(sql_text[i:j])
-            buffer_has_code = True
+        lexeme = _consume_lexeme(sql_text, i, n)
+        if lexeme is not None:
+            j, text, is_code = lexeme
+            buffer.append(text)
+            buffer_has_code = buffer_has_code or is_code
             i = j
             continue
 
-        # 注释
-        if ch == "#":
-            j = _skip_line(sql_text, i)
-            buffer.append(sql_text[i:j])
-            i = j
-            continue
-        if ch == "-" and sql_text[i : i + 2] == "--" and (i + 2 >= n or sql_text[i + 2] in " \t\r\n"):
-            j = _skip_line(sql_text, i)
-            buffer.append(sql_text[i:j])
-            i = j
-            continue
-        if ch == "/" and sql_text[i : i + 2] == "/*":
-            j = _skip_block_comment(sql_text, i)
-            buffer.append(sql_text[i:j])
-            # /*! ... */ 版本注释可执行，算语句内容
-            if sql_text[i : i + 3] == "/*!":
-                buffer_has_code = True
-            i = j
-            continue
-
-        # 分隔符命中
         if delimiter and sql_text.startswith(delimiter, i):
             statement = "".join(buffer).strip()
             if buffer_has_code:
@@ -107,9 +55,9 @@ def _scan(sql_text: str) -> tuple[list[str], str]:
             i += len(delimiter)
             continue
 
-        if not ch.isspace():
+        if not sql_text[i].isspace():
             buffer_has_code = True
-        buffer.append(ch)
+        buffer.append(sql_text[i])
         i += 1
 
     if buffer_has_code:
@@ -117,6 +65,52 @@ def _scan(sql_text: str) -> tuple[list[str], str]:
         if tail:
             statements.append(tail)
     return statements, delimiter
+
+
+def _is_delimiter_directive(sql_text: str, buffer: list[str], buffer_has_code: bool, i: int) -> bool:
+    """DELIMITER 只在语句起点识别：缓冲区仅含空白/注释且在行首。"""
+    return (
+        not buffer_has_code
+        and _at_line_start(buffer)
+        and sql_text[i : i + len(_DELIMITER_KEYWORD)].lower() == _DELIMITER_KEYWORD
+        and _is_word_boundary_before(sql_text, i)
+    )
+
+
+def _consume_delimiter(sql_text: str, i: int, n: int) -> tuple[int, str]:
+    """消费 DELIMITER 指令行，返回（行末位置，新分隔符）。"""
+    j = i + len(_DELIMITER_KEYWORD)
+    while j < n and sql_text[j] in " \t":
+        j += 1
+    k = j
+    while k < n and sql_text[k] not in "\r\n":
+        k += 1
+    return k, sql_text[j:k].strip()
+
+
+def _consume_lexeme(sql_text: str, i: int, n: int) -> tuple[int, str, bool] | None:
+    """消费引号串或注释；返回（结束位置，原文，是否可执行内容）。"""
+    ch = sql_text[i]
+    if ch == "'":
+        j = _skip_single_quoted(sql_text, i)
+        return j, sql_text[i:j], True
+    if ch == '"':
+        j = _skip_double_quoted(sql_text, i)
+        return j, sql_text[i:j], True
+    if ch == "`":
+        j = _skip_backquoted(sql_text, i)
+        return j, sql_text[i:j], True
+    if ch == "#":
+        j = _skip_line(sql_text, i)
+        return j, sql_text[i:j], False
+    if ch == "-" and sql_text[i : i + 2] == "--" and (i + 2 >= n or sql_text[i + 2] in " \t\r\n"):
+        j = _skip_line(sql_text, i)
+        return j, sql_text[i:j], False
+    if ch == "/" and sql_text[i : i + 2] == "/*":
+        j = _skip_block_comment(sql_text, i)
+        # /*! ... */ 版本注释可执行，算语句内容
+        return j, sql_text[i:j], sql_text[i : i + 3] == "/*!"
+    return None
 
 
 def _at_line_start(buffer: list[str]) -> bool:

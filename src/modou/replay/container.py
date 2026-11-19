@@ -96,6 +96,7 @@ class ShadowMySQL:
                 capture_output=True,
                 text=True,
                 timeout=300,  # 镜像拉取可能耗时较长。
+                check=False,
             )
         except subprocess.TimeoutExpired as exc:
             raise ContainerRuntimeError(f"container start timed out: {exc}") from exc
@@ -111,6 +112,7 @@ class ShadowMySQL:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                check=False,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
             # 容器 CLI 异常统一收敛为 ContainerRuntimeError

@@ -24,6 +24,8 @@ mcp = [
 [dependency-groups]
 dev = [
     "fastmcp>=4,<5",
+    "import-linter>=2.2",
+    "pylint>=3.3",
     "pytest>=8.0",
     "ruff>=0.6",
 ]
@@ -59,11 +61,43 @@ select = [
     "B",   # bugbear
     "SIM", # simplify
     "RUF", # ruff 专属
+    "TID",     # 导入卫生（禁父级相对导入）
+    "C901",    # 圈复杂度（默认 10）
+    "PLR0912", # 分支数（默认 12）
+    "PLR0915", # 语句数（默认 50）
+    "PLW",     # 常见错误模式（未检查的 subprocess、循环变量覆盖等）
+    "PERF",    # 低效写法
+    "C4",      # 冗余推导式/容器构造
+    "RET",     # 冗余 return
+    "T10",     # 禁止调试断点
+    "T20",     # 禁止 print
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # Typer 要求默认值通过 Option()/Argument() 声明；忽略该文件的 B008。
 "src/modou/cli.py" = ["B008"]
+
+[tool.importlinter]
+root_packages = ["modou"]
+
+# 内核只承载业务逻辑；CLI/MCP/UI 是表面层，反向依赖会破坏 ADR-0002 的层次。
+[[tool.importlinter.contracts]]
+name = "内核不依赖表面层（ADR-0002）"
+type = "forbidden"
+source_modules = [
+    "modou.changeset",
+    "modou.snapshot",
+    "modou.replay",
+    "modou.diff",
+    "modou.optimize",
+    "modou.lint",
+    "modou.patrol",
+    "modou.report",
+    "modou.ai",
+    "modou.params",
+    "modou.db",
+]
+forbidden_modules = ["modou.cli", "modou.server", "modou.ui"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
