@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
-import json
+from typing import Any
+
+from modou.report.jsonutil import dumps, one_line
 
 REPORT_VERSION = 1
 REPORT_KIND = "optimize"
@@ -22,7 +24,7 @@ STATUS_LABELS: dict[str, str] = {
 }
 
 
-def report_to_json(report: dict) -> dict:
+def report_to_json(report: dict[str, Any]) -> dict[str, Any]:
     """返回深拷贝并附报告格式标识。"""
     import copy
 
@@ -32,7 +34,7 @@ def report_to_json(report: dict) -> dict:
     return payload
 
 
-def render_text(report: dict) -> str:
+def render_text(report: dict[str, Any]) -> str:
     """生成中文优化报告，按库列出语句、发现、建议状态与副作用。"""
     lines: list[str] = ["墨斗优化报告", "＝" * 40]
 
@@ -73,14 +75,14 @@ def render_text(report: dict) -> str:
     return "\n".join(lines)
 
 
-def _render_statements(lines: list[str], statements: list[dict]) -> None:
+def _render_statements(lines: list[str], statements: list[dict[str, Any]]) -> None:
     for statement in statements:
         lines.append("")
         lines.append(f"── 语句 #{statement['index']} ──")
         baseline = statement.get("baseline") or {}
         cost = baseline.get("cost")
         cost_text = "不可得" if cost is None else f"{cost:.2f}"
-        lines.append(f"  SQL：{_one_line(statement['sql'])}")
+        lines.append(f"  SQL：{one_line(statement['sql'])}")
         lines.append(f"  基线代价：{cost_text}")
         lines.extend(f"  [发现] {finding['message']}" for finding in statement.get("findings", []))
         suggestions = statement.get("suggestions", [])
@@ -92,22 +94,17 @@ def _render_statements(lines: list[str], statements: list[dict]) -> None:
             if status == STATUS_MEASURED:
                 lines.append(
                     f"  [实测提升 {suggestion['improvement_pct']:.1f}%]（{source_label}）"
-                    f" {_one_line(suggestion['content'])}"
+                    f" {one_line(suggestion['content'])}"
                 )
                 lines.append(f"      代价 {suggestion['cost_before']:.2f} → {suggestion['cost_after']:.2f}")
             else:
                 reason = suggestion.get("reason") or "原因未说明"
-                lines.append(f"  [未验证]（{source_label}）{_one_line(suggestion['content'])}")
+                lines.append(f"  [未验证]（{source_label}）{one_line(suggestion['content'])}")
                 lines.append(f"      原因：{reason}")
             lines.extend(
                 f"      [附注·{note['kind']}] {note['message']}" for note in suggestion.get("side_effects", [])
             )
 
 
-def dumps_json(report: dict) -> str:
-    return json.dumps(report_to_json(report), ensure_ascii=False, indent=2) + "\n"
-
-
-def _one_line(text: str, limit: int = 160) -> str:
-    collapsed = " ".join(text.split())
-    return collapsed if len(collapsed) <= limit else collapsed[: limit - 3] + "..."
+def dumps_json(report: dict[str, Any]) -> str:
+    return dumps(report_to_json(report))

@@ -65,7 +65,7 @@ class StatementAnalysis:
     findings: list[Finding] = field(default_factory=list)
     candidates: list[IndexCandidate] = field(default_factory=list)
     # 语句引用的全部 (库, 表)，库已按 default_database 归一，供快照覆盖校验
-    referenced_tables: list[tuple[str, str]] = field(default_factory=list)
+    referenced_tables: list[tuple[str | None, str]] = field(default_factory=list)
 
 
 def analyze_statement(sql: str, default_database: str | None) -> StatementAnalysis:
@@ -73,7 +73,7 @@ def analyze_statement(sql: str, default_database: str | None) -> StatementAnalys
     try:
         tree = sqlglot.parse_one(sql, read="mysql")
     except sqlglot.errors.ParseError as exc:
-        raise ValueError(f"unparseable statement: {exc}") from exc
+        raise ValueError(f"unparsable statement: {exc}") from exc
     if tree is None or not isinstance(tree, (exp.Select, exp.Update, exp.Delete)):
         raise StatementTypeError("only SELECT/UPDATE/DELETE statements are supported for optimization")
 
@@ -290,8 +290,8 @@ def _contains_or(condition: exp.Expression) -> bool:
     return any(isinstance(node, exp.Or) for node in condition.walk())
 
 
-def _contains_column(node: exp.Expression | None) -> bool:
-    return node is not None and any(isinstance(child, exp.Column) for child in node.walk())
+def _contains_column(node: object) -> bool:
+    return isinstance(node, exp.Expr) and any(isinstance(child, exp.Column) for child in node.walk())
 
 
 def _is_wrapped_column(column: exp.Column, root: exp.Expression) -> bool:
@@ -301,7 +301,7 @@ def _is_wrapped_column(column: exp.Column, root: exp.Expression) -> bool:
     while parent is not None and parent is not root:
         if isinstance(parent, (exp.Select, exp.Union, exp.Subquery)):
             return False
-        if not seen_wrapper and isinstance(parent, (*exp.Func.__subclasses__(), *_WRAPPING_KINDS)):  # type: ignore[arg-type]
+        if not seen_wrapper and isinstance(parent, (*exp.Func.__subclasses__(), *_WRAPPING_KINDS)):
             seen_wrapper = True
         parent = parent.parent
     return seen_wrapper
@@ -381,7 +381,8 @@ def build_index_ddl(candidate: IndexCandidate, columns_meta: dict[str, ColumnDef
 
     rendered = []
     for col in candidate.columns:
-        column_type = meta.get(col).column_type if col in meta else ""
+        column = meta.get(col)
+        column_type = column.column_type if column is not None else ""
         prefix = ""
         if column_type.lower().startswith(
             ("text", "blob", "tinytext", "tinyblob", "mediumtext", "mediumblob", "longtext", "longblob")

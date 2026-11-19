@@ -9,6 +9,7 @@ import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 # 支持的报告类型与格式版本。
 SUPPORTED_REPORTS: dict[str, int] = {
@@ -43,7 +44,7 @@ class LoadedReport:
     kind: str
     version: int
     source: str
-    data: dict
+    data: dict[str, Any]
 
 
 def load_report(path: Path) -> LoadedReport:

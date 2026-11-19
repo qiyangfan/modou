@@ -1,0 +1,14 @@
+extends: default
+
+rules:
+  # GitHub Actions 工作流普遍省略文档起始标记。
+  document-start: disable
+  # 工作流必须以 on: 作为事件键，YAML 1.1 会把它解析为布尔真值。
+  truthy:
+    check-keys: false
+  # 长 URL 与单行命令在 workflow 中难以避免折行。
+  line-length:
+    max: 160
+  # Prettier 统一 YAML 注释为内容后一个空格；与格式化门禁对齐。
+  comments:
+    min-spaces-from-content: 1

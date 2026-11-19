@@ -1,44 +1,33 @@
-"""环境兼容检查：版本序列推导与支持下限（8.0）。"""
+"""影子库环境兼容检查：版本序列与 lower_case_table_names 必须与基线一致。"""
 
 from __future__ import annotations
 
-import pytest
-
-from modou.replay.env import unsupported_version_errors, version_series
+from modou.replay.env import compatibility_errors
 from modou.snapshot.model import SnapshotMeta
 
 
-def _meta(server_version: str) -> SnapshotMeta:
+def _meta(server_version: str = "8.0.36", lower_case_table_names: int = 0) -> SnapshotMeta:
     return SnapshotMeta(
         server_version=server_version,
         version_comment="t",
         character_set_server="utf8mb4",
         collation_server="utf8mb4_0900_ai_ci",
-        lower_case_table_names=0,
+        lower_case_table_names=lower_case_table_names,
         sql_mode="",
     )
 
 
-@pytest.mark.parametrize(
-    ("server_version", "expected"),
-    [("8.4.6", "8.4"), ("8.0.36", "8.0"), ("5.7.40-log", "5.7"), ("9.1.0", "9.1")],
-)
-def test_version_series(server_version: str, expected: str) -> None:
-    assert version_series(server_version) == expected
+def test_same_series_and_case_setting_pass() -> None:
+    assert compatibility_errors(_meta(), _meta()) == []
 
 
-@pytest.mark.parametrize("server_version", ["8.0.36", "8.4.11", "9.1.0"])
-def test_supported_versions_pass(server_version: str) -> None:
-    assert unsupported_version_errors(_meta(server_version)) == []
-
-
-def test_pre_8_baseline_rejected_with_pack_note() -> None:
-    errors = unsupported_version_errors(_meta("5.7.40"))
+def test_series_mismatch_rejected() -> None:
+    errors = compatibility_errors(_meta("8.0.36"), _meta("8.4.11"))
     assert len(errors) == 1
-    assert "not supported" in errors[0]
-    assert "pack" in errors[0]  # 必须提示 5.7 仅支持 pack 锁风险注记
+    assert "version series mismatch" in errors[0]
 
 
-def test_unparsable_version_rejected() -> None:
-    errors = unsupported_version_errors(_meta("not-a-version"))
-    assert errors and "unparsable server version" in errors[0]
+def test_lower_case_table_names_mismatch_rejected() -> None:
+    errors = compatibility_errors(_meta(), _meta(lower_case_table_names=1))
+    assert len(errors) == 1
+    assert "lower_case_table_names mismatch" in errors[0]

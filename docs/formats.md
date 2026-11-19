@@ -132,11 +132,11 @@ SHOW CREATE TABLE / VIEW / PROCEDURE / FUNCTION / TRIGGER / EVENT <db>.<obj>;
 
 结论分类语义（维度级判定、按类别聚合成「对象 × 类别」条目）：
 
-| kind | 判定（逐维度/逐条目） |
-|---|---|
-| `missing_execution` | 期望态与实际态不同，且实际停在该维度的基线态（变更未生效） |
-| `wrong_execution` | 实际态同时异于基线与期望（执行了但结果不对） |
-| `historical_drift` | 变更集未触碰的条目，线上却与基线不同（他人并行改动/采集遗漏） |
+| kind                | 判定（逐维度/逐条目）                                         |
+| ------------------- | ------------------------------------------------------------- |
+| `missing_execution` | 期望态与实际态不同，且实际停在该维度的基线态（变更未生效）    |
+| `wrong_execution`   | 实际态同时异于基线与期望（执行了但结果不对）                  |
+| `historical_drift`  | 变更集未触碰的条目，线上却与基线不同（他人并行改动/采集遗漏） |
 
 退出码多库聚合取最严重档：2 > 1 > 0。
 
@@ -252,12 +252,14 @@ SHOW CREATE TABLE / VIEW / PROCEDURE / FUNCTION / TRIGGER / EVENT <db>.<obj>;
   "summary": { "hits": 2, "error": 1, "warning": 1, "info": 0, "files": 1 },
   "hits": [
     {
-      "rule_id": "CLA.015", "level": "error",       // error / warning / info
-      "file": "V01__update.sql", "line": 3,          // 语句起始行（含前置注释，大致位置）
+      "rule_id": "CLA.015",
+      "level": "error", // error / warning / info
+      "file": "V01__update.sql",
+      "line": 3, // 语句起始行（含前置注释，大致位置）
       "message": "UPDATE 语句无 WHERE 条件，将更新全表",
-      "suggestion": "确认非误写，必要时先在影子库验证影响面"
-    }
-  ]
+      "suggestion": "确认非误写，必要时先在影子库验证影响面",
+    },
+  ],
 }
 ```
 
@@ -346,10 +348,22 @@ optimize（候选生成，advisor 节既有）四车道可附 AI 分析。契约
 的条目数承接——0 行与跳过采样的表在两侧口径下都不计入）。
 
 ```jsonc
-{ "server_version": "8.4.6",
-  "databases": { "<库名>": {
-      "tables": 3, "views": 1, "procedures": 2, "functions": 0, "triggers": 1, "events": 0,
-      "table_details": [ { "table": "orders", "columns": 12, "indexes": 4, "sampled_rows": 200 } ] } } }
+{
+  "server_version": "8.4.6",
+  "databases": {
+    "<库名>": {
+      "tables": 3,
+      "views": 1,
+      "procedures": 2,
+      "functions": 0,
+      "triggers": 1,
+      "events": 0,
+      "table_details": [
+        { "table": "orders", "columns": 12, "indexes": 4, "sampled_rows": 200 },
+      ],
+    },
+  },
+}
 ```
 
 ## 报告 UI 类型识别口径

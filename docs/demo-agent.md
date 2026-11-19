@@ -23,18 +23,18 @@ uv tool install 'modou[mcp]'     # MCP 表面依赖为可选 extra
 
 ## 工具清单（与 CLI 同源）
 
-| 工具 | CLI 对应 | 说明 |
-|---|---|---|
-| `pack` | `modou pack` | 打包变更集 + 破坏性预警 |
-| `verify` | `modou verify` | 影子回放 + 三方 diff（返回 `exit_code` 与报告；BYOK 下附失败归因观点） |
-| `snapshot_capture` | `modou snapshot capture` | 只读结构快照（可选采样；返回 `summary` 证据摘要） |
-| `optimize` | `modou optimize` | 慢 SQL 影子实证优化（BYOK AI 可选，EXPLAIN 事实预取打包） |
-| `lint` | `modou lint` | 静态 SQL 规则审核（BYOK 下附残留语句语义评审） |
-| `patrol_drift` | `modou patrol drift` | 两方结构漂移 |
-| `patrol_unused_indexes` | `modou patrol unused-indexes` | 未用/冗余索引分层判定 |
-| `patrol_slowlog` | `modou patrol slowlog` | 慢日志指纹聚合 |
-| `patrol_summarize` | `modou patrol summarize` | 跨信号综合摘要（BYOK 下附跨信号叙事） |
-| `version` | `modou version` | 版本号 |
+| 工具                    | CLI 对应                      | 说明                                                                   |
+| ----------------------- | ----------------------------- | ---------------------------------------------------------------------- |
+| `pack`                  | `modou pack`                  | 打包变更集 + 破坏性预警                                                |
+| `verify`                | `modou verify`                | 影子回放 + 三方 diff（返回 `exit_code` 与报告；BYOK 下附失败归因观点） |
+| `snapshot_capture`      | `modou snapshot capture`      | 只读结构快照（可选采样；返回 `summary` 证据摘要）                      |
+| `optimize`              | `modou optimize`              | 慢 SQL 影子实证优化（BYOK AI 可选，EXPLAIN 事实预取打包）              |
+| `lint`                  | `modou lint`                  | 静态 SQL 规则审核（BYOK 下附残留语句语义评审）                         |
+| `patrol_drift`          | `modou patrol drift`          | 两方结构漂移                                                           |
+| `patrol_unused_indexes` | `modou patrol unused-indexes` | 未用/冗余索引分层判定                                                  |
+| `patrol_slowlog`        | `modou patrol slowlog`        | 慢日志指纹聚合                                                         |
+| `patrol_summarize`      | `modou patrol summarize`      | 跨信号综合摘要（BYOK 下附跨信号叙事）                                  |
+| `version`               | `modou version`               | 版本号                                                                 |
 
 `exit_code` 语义与 CLI 一致：0=ok，1=存在差异结论（verify），2=环境或输入错误。
 证据原语清单（快照摘要/回放验收/三方 diff/EXPLAIN/lint 命中）冻结在
@@ -57,7 +57,7 @@ EXPLAIN 由 verify/optimize 的报告字段承载，不另设工具。
 
 链路（三个工具，单一 MCP 会话内，中间产物以本地文件路径传递）：
 
-```
+```text
 ① pack(changeset_dir=examples/changeset-demo)
    → exit_code=0，warnings=[锁风险 2 条（INSTANT/INPLACE 标注）、待人工复核 1 条]
 ② verify(changeset_dir, baseline, after, default_database=demo_shop)

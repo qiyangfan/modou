@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from modou.ai.client import (
     DEFAULT_TIMEOUT_SECONDS,
@@ -16,6 +17,7 @@ from modou.ai.client import (
     default_transport,
     extract_json_array,
 )
+from modou.ai.lane_common import parse_opinions
 from modou.ai.slicer import slice_schema
 from modou.changeset.pack import pack_changeset
 from modou.replay.splitter import split_statements
@@ -40,7 +42,7 @@ _SYSTEM_PROMPT = (
 
 
 def attribute_findings(
-    report_json: dict,
+    report_json: dict[str, Any],
     changeset_dir: Path,
     baseline: Snapshot,
     *,
@@ -83,24 +85,13 @@ def attribute_findings(
     items = extract_json_array(content)
     if items is None:
         # 回复不可解析时按调用失败降级。
-        return [degraded(LANE, "report", config.model, "unparseable reply (no JSON array)")]
-    opinions: list[AiOpinion] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        subject = item.get("subject")
-        text = item.get("opinion")
-        if not isinstance(subject, str) or subject not in conclusion_subjects:
-            continue  # 丢弃指向未知结论的条目
-        if not isinstance(text, str) or not text.strip():
-            continue
-        opinions.append(AiOpinion(lane=LANE, subject=subject, opinion=text.strip(), model=config.model))
-    return opinions
+        return [degraded(LANE, "report", config.model, "unparsable reply (no JSON array)")]
+    return parse_opinions(items, LANE, conclusion_subjects, config.model)
 
 
-def _extract_facts(report_json: dict) -> tuple[set[str], list[dict], dict | None] | None:
+def _extract_facts(report_json: dict[str, Any]) -> tuple[set[str], list[dict[str, Any]], dict[str, Any] | None] | None:
     """提取归因事实；无结论且无回放错误时返回 None，调用方据此跳过 AI。"""
-    conclusions: list[dict] = []
+    conclusions: list[dict[str, Any]] = []
     subjects: set[str] = set()
     for db_name, db_conclusions in (report_json.get("databases") or {}).items():
         for conclusion in db_conclusions:

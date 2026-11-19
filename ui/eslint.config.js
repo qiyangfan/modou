@@ -4,7 +4,7 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     rules: {
-      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-non-null-assertion": "error",
       // 结构与复杂度门禁，采用 ESLint 默认阈值：复杂度 20 / 嵌套 4 / 文件 300 行 /
       // 函数 50 行 / 参数 3。
       complexity: "error",

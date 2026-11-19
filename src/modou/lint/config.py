@@ -8,6 +8,7 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from modou.lint.engine import Thresholds
 
@@ -24,7 +25,7 @@ class LintConfig:
     thresholds: Thresholds = field(default_factory=Thresholds)
 
 
-def _parse_threshold(raw: dict, key: str, path: Path) -> int:
+def _parse_threshold(raw: dict[str, Any], key: str, path: Path) -> int:
     """读取正整数阈值；布尔、非整浮点、负值和非数值都拒绝。"""
     value = raw.get(key, getattr(Thresholds, key))
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):

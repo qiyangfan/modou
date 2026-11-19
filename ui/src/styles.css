@@ -11,9 +11,11 @@
   --info: #8fd694;
   --ok: #57c785;
 }
+
 * {
   box-sizing: border-box;
 }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -24,20 +26,24 @@ body {
     "Microsoft YaHei",
     sans-serif;
 }
+
 #app {
   display: flex;
   min-height: 100vh;
 }
+
 aside {
   width: 280px;
   border-right: 1px solid var(--border);
   padding: 16px;
   background: var(--panel);
 }
+
 aside h1 {
   font-size: 16px;
   margin: 0 0 12px;
 }
+
 .report-item {
   padding: 10px 12px;
   border: 1px solid var(--border);
@@ -45,26 +51,32 @@ aside h1 {
   margin-bottom: 8px;
   cursor: pointer;
 }
+
 .report-item.active {
   border-color: var(--accent);
 }
+
 .report-item .kind {
   font-weight: 600;
 }
+
 .report-item .sub {
   color: var(--muted);
   font-size: 12px;
 }
+
 main {
   flex: 1;
   padding: 24px;
   overflow: auto;
 }
+
 h2 {
   font-size: 15px;
   border-bottom: 1px solid var(--border);
   padding-bottom: 6px;
 }
+
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -72,6 +84,7 @@ h2 {
   padding: 12px 16px;
   margin-bottom: 12px;
 }
+
 .badge {
   display: inline-block;
   padding: 1px 8px;
@@ -79,47 +92,58 @@ h2 {
   font-size: 12px;
   margin-right: 6px;
 }
+
 .badge.error {
-  background: rgba(255, 107, 107, 0.15);
+  background: rgb(255 107 107 / 15%);
   color: var(--error);
 }
+
 .badge.warning {
-  background: rgba(255, 184, 77, 0.15);
+  background: rgb(255 184 77 / 15%);
   color: var(--warn);
 }
+
 .badge.info {
-  background: rgba(143, 214, 148, 0.15);
+  background: rgb(143 214 148 / 15%);
   color: var(--info);
 }
+
 .badge.measured {
-  background: rgba(87, 199, 133, 0.15);
+  background: rgb(87 199 133 / 15%);
   color: var(--ok);
 }
+
 .badge.unverified {
-  background: rgba(139, 152, 165, 0.15);
+  background: rgb(139 152 165 / 15%);
   color: var(--muted);
 }
+
 .badge.added {
-  background: rgba(87, 199, 133, 0.15);
+  background: rgb(87 199 133 / 15%);
   color: var(--ok);
 }
+
 .badge.removed {
-  background: rgba(255, 107, 107, 0.15);
+  background: rgb(255 107 107 / 15%);
   color: var(--error);
 }
+
 .badge.changed {
-  background: rgba(77, 163, 255, 0.15);
+  background: rgb(77 163 255 / 15%);
   color: var(--accent);
 }
+
 .badge.kind {
-  background: rgba(77, 163, 255, 0.12);
+  background: rgb(77 163 255 / 12%);
   color: var(--accent);
 }
+
 table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 6px;
 }
+
 th,
 td {
   text-align: left;
@@ -127,15 +151,18 @@ td {
   border-bottom: 1px solid var(--border);
   font-size: 13px;
 }
+
 th {
   color: var(--muted);
   font-weight: 500;
 }
+
 code,
 pre {
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 12.5px;
 }
+
 pre {
   background: #0d1117;
   border: 1px solid var(--border);
@@ -143,9 +170,11 @@ pre {
   padding: 8px;
   overflow: auto;
 }
+
 .muted {
   color: var(--muted);
 }
+
 .summary-row {
   margin: 4px 0 12px;
   color: var(--muted);

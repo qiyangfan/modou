@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -15,11 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           # 3.12 是项目支持的最低版本。
           python-version: "3.12"
@@ -28,15 +33,69 @@ jobs:
       - name: Build UI assets
         run: npm ci --prefix ui && npm run build --prefix ui
       - run: uv sync --frozen
+      # 打包门禁：wheel 必须包含 UI 构建产物，避免发布物缺界面资源。
+      - name: Build package
+        run: |
+          uv build
+          uv run python - <<'PY'
+          import glob
+          import os
+          import zipfile
+
+          wheel = max(glob.glob("dist/*.whl"), key=os.path.getmtime)
+          names = zipfile.ZipFile(wheel).namelist()
+          assert any(name.startswith("modou/ui/dist/") for name in names), names
+          PY
       - run: uv run ruff format --check .
       - run: uv run ruff check .
+      # 类型门禁：mypy strict，只约束生产代码。
+      - run: uv run mypy src/modou
       # 体积门禁（kongming 同口径：pylint 默认阈值 1000 行 / 20 个公有方法）。
       - run: uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods --jobs=0 src/modou
       # 分层门禁：内核不得反向依赖 CLI/MCP/UI（ADR-0002）。
       - run: uv run lint-imports
-      - run: uv run pytest -q
+      # 依赖卫生：未使用、缺失与传递依赖（自有包按第一方识别）。
+      - run: uv run deptry .
+      # 死代码：只报 100% 置信度的未使用变量，避免框架动态注册误报。
+      - run: uv run vulture src tests --min-confidence 100
+      # 拼写检查（英文标识符与文档）。
+      - run: uv run codespell
+      # workflow 安全分析：动作必须固定到提交 SHA，权限最小化。
+      - run: uv run zizmor .github/workflows
+      # YAML 语义检查：workflow、dependabot、openspec 与根级配置。
+      - run: uv run yamllint -f parsable .github openspec examples/ci/pack-gate.yml .pre-commit-config.yaml .yamllint.yml
+      # 覆盖率门禁：低于 80% 直接失败（集成用例默认跳过，阈值按离线基线）。
+      - run: uv run pytest -q --cov=modou --cov-report=term --cov-fail-under=80
       - name: CLI 冒烟
         run: uv run modou --help
+
+  # workflow 静态检查：actionlint 默认规则（runner 自带 shellcheck）。
+  workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install actionlint
+        run: |
+          curl -sSfL -o /tmp/actionlint.tar.gz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          tar -xzf /tmp/actionlint.tar.gz -C /usr/local/bin actionlint
+      - run: actionlint .github/workflows/*.yml
+      - name: Install taplo
+        run: |
+          curl -sSfL -o /tmp/taplo.gz \
+            https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-x86_64.gz
+          gunzip -c /tmp/taplo.gz > /usr/local/bin/taplo
+          chmod +x /usr/local/bin/taplo
+      - run: taplo fmt --check pyproject.toml .gitleaks.toml
+      - run: taplo lint pyproject.toml .gitleaks.toml
+      # spec 门禁：变更与规格必须通过严格校验。
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+      - run: npx --yes @fission-ai/openspec@1 validate --all --strict
 
   # UI 目录不存在时跳过前端门禁。
   # hashFiles 仅 step 级可用,目录存在性判定须由独立 job 输出。
@@ -46,7 +105,9 @@ jobs:
     outputs:
       exists: ${{ steps.check.outputs.exists }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - id: check
         run: |
           if [ -d ui ]; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
@@ -60,12 +121,20 @@ jobs:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
       - run: npm ci
       - run: npm run typecheck --if-present
       - run: npm run lint --if-present
       - run: npm run format:check --if-present
+      - run: npm run style:check --if-present
+      - run: npm run dup:check --if-present
+      - run: npm run arch:check --if-present
+      - run: npm run docs:check --if-present
+      - run: npm run docs:format:check --if-present
+      - run: npm run dead:check --if-present
       - run: npm test --if-present

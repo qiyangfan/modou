@@ -1,0 +1,7 @@
+name: modou
+# 只扫描源码：构建产物与依赖目录不参与分析。
+paths-ignore:
+  - dist
+  - ui/dist
+  - ui/node_modules
+  - .venv

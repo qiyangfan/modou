@@ -7,6 +7,7 @@ import re
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Any
 
 ENV_BASE_URL = "MOUDO_AI_BASE_URL"
 ENV_API_KEY = "MOUDO_AI_API_KEY"
@@ -14,12 +15,12 @@ ENV_MODEL = "MOUDO_AI_MODEL"
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
-Transport = Callable[[str, str, dict, float], dict]
+Transport = Callable[[str, str, dict[str, Any], float], dict[str, Any]]
 
 _JSON_ARRAY_PATTERN = re.compile(r"\[.*\]", re.DOTALL)
 
 
-def extract_json_array(content: str) -> list | None:
+def extract_json_array(content: str) -> list[Any] | None:
     """提取回复中的 JSON 数组；找不到或不是数组时返回 None。"""
     match = _JSON_ARRAY_PATTERN.search(content)
     if match is None:
@@ -52,7 +53,7 @@ def config_from_env(env: Mapping[str, str]) -> AiConfig | None:
     return AiConfig(base_url=base_url, api_key=api_key, model=model)
 
 
-def default_transport(url: str, api_key: str, payload: dict, timeout: float) -> dict[str, object]:
+def default_transport(url: str, api_key: str, payload: dict[str, Any], timeout: float) -> dict[str, object]:
     """用标准库调用 OpenAI 兼容端点。"""
     request = urllib.request.Request(
         url,
@@ -63,14 +64,14 @@ def default_transport(url: str, api_key: str, payload: dict, timeout: float) -> 
     with urllib.request.urlopen(request, timeout=timeout) as response:
         body = response.read()
     try:
-        return json.loads(body.decode("utf-8"))
+        return dict(json.loads(body.decode("utf-8")))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise AiCallError(f"invalid AI endpoint response: {exc}") from exc
 
 
 def complete(
     config: AiConfig,
-    payload: dict,
+    payload: dict[str, Any],
     *,
     transport: Transport = default_transport,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
@@ -94,7 +95,8 @@ def complete(
             last_error = exc
         except Exception as exc:  # 传输层任何异常都归入调用失败，由调用方降级
             last_error = AiCallError(str(exc) or exc.__class__.__name__)
-    # attempts >= 1，循环至少执行一次，last_error 必已赋值
+    if last_error is None:  # attempts >= 1 时不可达，仅用于类型收窄
+        raise AiCallError("AI call failed without error detail")
     raise last_error
 
 

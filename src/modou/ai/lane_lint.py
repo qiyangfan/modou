@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from modou.ai.bundler import DEFAULT_MAX_CHARS, DEFAULT_MAX_STATEMENTS, StatementUnit, bundle_units
 from modou.ai.client import (
@@ -18,6 +19,7 @@ from modou.ai.client import (
     extract_json_array,
 )
 from modou.ai.injector import render_rule_context
+from modou.ai.lane_common import parse_opinions
 from modou.lint.engine import Hit
 from modou.report.opinions import AiOpinion, degraded
 
@@ -64,7 +66,7 @@ def _review_batch(
     timeout_seconds: float,
 ) -> list[AiOpinion]:
     subjects = {unit.subject for unit in batch}
-    user_payload: dict = {"statements": [{"subject": unit.subject, "sql": unit.sql} for unit in batch]}
+    user_payload: dict[str, Any] = {"statements": [{"subject": unit.subject, "sql": unit.sql} for unit in batch]}
     if rule_context:
         user_payload["static_rule_hits"] = rule_context
     try:
@@ -80,19 +82,8 @@ def _review_batch(
     items = extract_json_array(content)
     if items is None:
         # 回复不可解析时按调用失败降级。
-        return [degraded(LANE, _batch_subject(batch), config.model, "unparseable reply (no JSON array)")]
-    opinions: list[AiOpinion] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        subject = item.get("subject")
-        text = item.get("opinion")
-        if not isinstance(subject, str) or subject not in subjects:
-            continue  # 丢弃指向批次外对象的条目
-        if not isinstance(text, str) or not text.strip():
-            continue
-        opinions.append(AiOpinion(lane=LANE, subject=subject, opinion=text.strip(), model=config.model))
-    return opinions
+        return [degraded(LANE, _batch_subject(batch), config.model, "unparsable reply (no JSON array)")]
+    return parse_opinions(items, LANE, subjects, config.model)
 
 
 def _batch_subject(batch: list[StatementUnit]) -> str:

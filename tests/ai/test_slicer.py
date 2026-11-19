@@ -67,7 +67,7 @@ class TestTouchedObjects:
         touched = touched_objects("USE shop")
         assert touched.databases == {"shop"}
 
-    def test_unparseable_statement_reports_not_usable(self) -> None:
+    def test_unparsable_statement_reports_not_usable(self) -> None:
         # 只有残缺结构才抛解析错误；sqlglot 会把乱码解析成标识符
         touched = touched_objects("SELECT * FROM orders WHERE note = 'unterminated", default_database="shop")
         assert touched.usable is False

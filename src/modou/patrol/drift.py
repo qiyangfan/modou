@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from modou.diff.threeway import (
     _OBJECT_CATEGORIES,
@@ -133,7 +135,7 @@ def _diff_table(db_name: str, name: str, b_table: TableDef | None, c_table: Tabl
             conclusion.dimensions.append(dimension)
         conclusion.details.append(detail)
 
-    dimension_specs = [
+    dimension_specs: list[tuple[str, dict[str, Any], dict[str, Any], Callable[[Any], str]]] = [
         ("columns", {c.name: c for c in b_table.columns}, {c.name: c for c in c_table.columns}, _render_column),
         ("indexes", {i.name: i for i in b_table.indexes}, {i.name: i for i in c_table.indexes}, _render_index),
         (

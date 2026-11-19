@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from typing import Any
 
 import sqlglot
 import sqlglot.errors
@@ -57,7 +58,7 @@ def slice_schema(
     *,
     default_database: str | None = None,
     max_chars: int = DEFAULT_SCHEMA_BUDGET_CHARS,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """按触达范围返回 schema 条目；触达表必含，其他同库表受字符预算限制。"""
     all_touched, _ = _collect_touched(statements, default_database)
     resolved = _resolve_touched(all_touched, snapshot)
@@ -94,15 +95,15 @@ def _resolve_touched(all_touched: TouchedContext, snapshot: Snapshot) -> set[tup
     return resolved
 
 
-def _initial_entries(resolved: set[tuple[str, str]], snapshot: Snapshot) -> tuple[list[dict], int]:
+def _initial_entries(resolved: set[tuple[str, str]], snapshot: Snapshot) -> tuple[list[dict[str, Any]], int]:
     entry_by_key = {key: _table_entry(key[0], key[1], snapshot) for key in resolved}
-    ordered: list[dict] = [entry_by_key[key] for key in sorted(resolved)]
+    ordered: list[dict[str, Any]] = [entry_by_key[key] for key in sorted(resolved)]
     used = sum(len(json.dumps(entry, ensure_ascii=False)) for entry in ordered)
     return ordered, used
 
 
 def _extend_with_budget(
-    ordered: list[dict],
+    ordered: list[dict[str, Any]],
     used: int,
     resolved: set[tuple[str, str]],
     snapshot: Snapshot,
@@ -122,7 +123,7 @@ def _extend_with_budget(
             ordered.append(entry)
 
 
-def _table_entry(db_name: str, table_name: str, snapshot: Snapshot) -> dict:
+def _table_entry(db_name: str, table_name: str, snapshot: Snapshot) -> dict[str, Any]:
     table = snapshot.databases[db_name].tables[table_name]
     return {
         "database": db_name,

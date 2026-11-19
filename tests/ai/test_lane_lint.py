@@ -63,12 +63,12 @@ class TestReviewResidual:
         opinions = review_residual(_units("a.sql:1"), [], _config(), transport=_transport_reply(reply))
         assert [(o.subject, o.opinion) for o in opinions] == [("a.sql:1", "合法观点")]
 
-    def test_unparseable_reply_degrades_not_silent(self) -> None:
+    def test_unparsable_reply_degrades_not_silent(self) -> None:
         """回复不可解析时降级，并说明原因。"""
         opinions = review_residual(_units("a.sql:1"), [], _config(), transport=_transport_reply("抱歉我无法输出 JSON"))
         assert len(opinions) == 1
         assert opinions[0].status == "degraded"
-        assert "unparseable" in (opinions[0].degraded_reason or "")
+        assert "unparsable" in (opinions[0].degraded_reason or "")
 
     def test_call_failure_degrades_not_raises(self) -> None:
         opinions = review_residual(

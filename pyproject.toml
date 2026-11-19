@@ -6,28 +6,35 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
-    # 为 PyMySQL 的 MySQL 8 默认认证提供运行时依赖。
-    "cryptography>=42.0",
-    "pymysql>=1.1",
-    "sqlglot>=25.0",
-    "typer>=0.12",
+  # 为 PyMySQL 的 MySQL 8 默认认证提供运行时依赖。
+  "cryptography>=42.0",
+  "pymysql>=1.1",
+  "sqlglot>=25.0",
+  "typer>=0.12",
 ]
 
 [project.scripts]
 modou = "modou.cli:app"
 
 [project.optional-dependencies]
-mcp = [
-    "fastmcp>=4,<5",
-]
+mcp = ["fastmcp>=4,<5"]
 
 [dependency-groups]
 dev = [
-    "fastmcp>=4,<5",
-    "import-linter>=2.2",
-    "pylint>=3.3",
-    "pytest>=8.0",
-    "ruff>=0.6",
+  "codespell>=2.4.3",
+  "deptry>=0.25.1",
+  "fastmcp>=4,<5",
+  "import-linter>=2.2",
+  "mypy>=2.4.1",
+  "pip-audit>=2.10.1",
+  "pylint>=3.3",
+  "pytest>=8.0",
+  "pytest-cov>=7.1.0",
+  "ruff>=0.6",
+  "types-pymysql>=1.2.4.20261116",
+  "vulture>=2.16",
+  "yamllint>=1.38.0",
+  "zizmor>=1.32.0",
 ]
 
 [build-system]
@@ -53,28 +60,29 @@ target-version = "py312"
 # 保留中文注释和文档中的全角标点。
 ignore = ["RUF001", "RUF002", "RUF003"]
 select = [
-    "E",   # pycodestyle
-    "F",   # pyflakes
-    "W",   # pycodestyle warning
-    "I",   # isort
-    "UP",  # pyupgrade
-    "B",   # bugbear
-    "SIM", # simplify
-    "RUF", # ruff 专属
-    "TID",     # 导入卫生（禁父级相对导入）
-    "C901",    # 圈复杂度（默认 10）
-    "PLR0912", # 分支数（默认 12）
-    "PLR0915", # 语句数（默认 50）
-    "PLW",     # 常见错误模式（未检查的 subprocess、循环变量覆盖等）
-    "PERF",    # 低效写法
-    "C4",      # 冗余推导式/容器构造
-    "RET",     # 冗余 return
-    "T10",     # 禁止调试断点
-    "T20",     # 禁止 print
+  "E",       # pycodestyle
+  "F",       # pyflakes
+  "W",       # pycodestyle warning
+  "I",       # isort
+  "UP",      # pyupgrade
+  "B",       # bugbear
+  "SIM",     # simplify
+  "RUF",     # ruff 专属
+  "TID",     # 导入卫生（禁父级相对导入）
+  "C901",    # 圈复杂度（默认 10）
+  "PLR0912", # 分支数（默认 12）
+  "PLR0915", # 语句数（默认 50）
+  "PLW",     # 常见错误模式（未检查的 subprocess、循环变量覆盖等）
+  "PERF",    # 低效写法
+  "C4",      # 冗余推导式/容器构造
+  "RET",     # 冗余 return
+  "T10",     # 禁止调试断点
+  "T20",     # 禁止 print
+  "N",       # 命名规范（pep8-naming）
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Typer 要求默认值通过 Option()/Argument() 声明；忽略该文件的 B008。
+# Typer 通过函数默认值声明 CLI 参数；B008 在该文件是框架用法而非缺陷。
 "src/modou/cli.py" = ["B008"]
 
 [tool.importlinter]
@@ -85,22 +93,62 @@ root_packages = ["modou"]
 name = "内核不依赖表面层（ADR-0002）"
 type = "forbidden"
 source_modules = [
-    "modou.changeset",
-    "modou.snapshot",
-    "modou.replay",
-    "modou.diff",
-    "modou.optimize",
-    "modou.lint",
-    "modou.patrol",
-    "modou.report",
-    "modou.ai",
-    "modou.params",
-    "modou.db",
+  "modou.changeset",
+  "modou.snapshot",
+  "modou.replay",
+  "modou.diff",
+  "modou.optimize",
+  "modou.lint",
+  "modou.patrol",
+  "modou.report",
+  "modou.ai",
+  "modou.params",
+  "modou.db",
 ]
 forbidden_modules = ["modou.cli", "modou.server", "modou.ui"]
 
+# 依赖只能从高层流向低层；任何环都会同时产生一条反向依赖而失败。
+[[tool.importlinter.contracts]]
+name = "分层依赖单向（无环）"
+type = "layers"
+layers = [
+  "modou.server : modou.cli",
+  "modou.ui",
+  "modou.verify",
+  "modou.patrol",
+  "modou.optimize",
+  "modou.ai",
+  "modou.report",
+  "modou.diff",
+  "modou.lint",
+  "modou.changeset",
+  "modou.replay",
+  "modou.snapshot",
+  "modou.params",
+  "modou.db",
+]
+
+# 三类巡检信号各自采集，互不依赖；汇总只在 patrol.report 做。
+[[tool.importlinter.contracts]]
+name = "巡检信号相互独立"
+type = "independence"
+modules = [
+  "modou.patrol.drift",
+  "modou.patrol.slowlog",
+  "modou.patrol.unused_indexes",
+]
+
+[tool.mypy]
+strict = true
+
+[tool.deptry]
+# 自有包按第一方模块识别，避免把 modou.* 误判为缺失依赖。
+known_first_party = ["modou"]
+# cryptography 由 PyMySQL 在运行时按认证插件加载，代码中无直接导入。
+per_rule_ignores = { DEP002 = ["cryptography"] }
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = [
-    "needs_byok_env: 保留真实 BYOK 环境变量（评测门禁专用，其余用例默认剥离）",
-]
+# 警告即错误：弃用 API 与资源泄漏在门禁中直接失败。
+filterwarnings = ["error"]
+markers = ["needs_byok_env: 保留真实 BYOK 环境变量（评测门禁专用，其余用例默认剥离）"]

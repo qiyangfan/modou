@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 FORMAT_VERSION = 2
 # v1 只有结构；v2 增加可选采样数据
@@ -18,7 +19,7 @@ class TableSample:
     """表的确定性样本与数据规模信息。"""
 
     columns: list[str] = field(default_factory=list)
-    rows: list[list] = field(default_factory=list)
+    rows: list[list[Any]] = field(default_factory=list)
     sampled_rows: int = 0
     estimated_rows: int | None = None
     method: str = "primary_key_asc"  # 采样方式，如 primary_key_asc、skipped_no_primary_key
@@ -142,14 +143,14 @@ def _require_int(value: object, where: str) -> int:
         raise ValueError(f"snapshot field {where} must be an integer") from exc
 
 
-def _require_dict(value: object, where: str) -> dict:
+def _require_dict(value: object, where: str) -> dict[str, Any]:
     """要求字段为 JSON object，格式错误时抛出 ValueError。"""
     if not isinstance(value, dict):
         raise ValueError(f"snapshot field {where} must be a JSON object")
     return value
 
 
-def _require_list(value: object, where: str) -> list:
+def _require_list(value: object, where: str) -> list[Any]:
     if not isinstance(value, list):
         raise ValueError(f"snapshot field {where} must be a JSON array")
     return value

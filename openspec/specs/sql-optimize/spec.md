@@ -1,6 +1,7 @@
 # sql-optimize Specification
 
 ## Purpose
+
 慢 SQL 的确定性优化建议：候选索引/改写一律经本地影子 MySQL 实证
 （采样数据 + EXPLAIN 代价前后对比）后才能标「实测提升」，未过实证关的建议
 只得以「未验证」进报告；AI 顾问（BYOK）只当候选来源，退出码不受其影响。 add-optimize-lane. Update Purpose after archive.

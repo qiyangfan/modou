@@ -7,11 +7,11 @@ from pathlib import Path
 import pymysql.connections
 
 from modou.changeset.pack import pack_changeset
-from modou.diff.pipeline import run_verify
 from modou.diff.threeway import KIND_DRIFT, KIND_MISSING, KIND_WRONG
 from modou.replay.splitter import split_statements
 from modou.report.render import EXIT_DIFF, EXIT_ERROR, EXIT_OK
 from modou.snapshot.introspect import capture_snapshot
+from modou.verify import run_verify
 from tests.conftest import unique_db
 
 CREATE_ORDERS = (

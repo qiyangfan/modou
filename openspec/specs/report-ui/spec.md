@@ -1,6 +1,7 @@
 # report-ui Specification
 
 ## Purpose
+
 本地薄报告层：把 modou 产出的各类报告 JSON 经仅回环监听的只读网页渲染，
 零外部请求、零存储；绑定只允许 IPv4 回环，报告内容（schema 元数据）不出本机。
 

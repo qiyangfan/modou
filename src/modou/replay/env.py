@@ -5,33 +5,8 @@
 
 from __future__ import annotations
 
+from modou.snapshot.compat import version_series
 from modou.snapshot.model import SnapshotMeta
-
-# 依赖 8.0.13+ 的 STATISTICS.expression 与 8.0.16+ 的 CHECK_CONSTRAINTS；更老版本入口处拒绝。
-# 5.7 只用于 pack 的锁风险注记。
-MINIMUM_SUPPORTED_MAJOR = 8
-
-
-def version_series(server_version: str) -> str:
-    """取版本序列：'8.4.6' -> '8.4'（MySQL 版本序列 = 主.次，8.0/8.4/5.7 为不同序列）。"""
-    parts = server_version.split("-")[0].split(".")
-    return ".".join(parts[:2])
-
-
-def unsupported_version_errors(meta: SnapshotMeta) -> list[str]:
-    """返回版本低于支持下限的错误；空清单表示支持。"""
-    series = version_series(meta.server_version)
-    try:
-        major = int(series.split(".")[0])
-    except ValueError:
-        return [f"unparsable server version: {meta.server_version!r}"]
-    if major < MINIMUM_SUPPORTED_MAJOR:
-        return [
-            f"MySQL {meta.server_version} is not supported for snapshot capture/verify "
-            f"(minimum series: {MINIMUM_SUPPORTED_MAJOR}.0); "
-            "5.7 is only supported for pack lock-risk notes (--target-major)"
-        ]
-    return []
 
 
 def compatibility_errors(baseline_meta: SnapshotMeta, shadow_meta: SnapshotMeta) -> list[str]:

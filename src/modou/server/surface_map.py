@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import inspect
 
+from typer.models import CommandInfo
+
 from modou.cli import app as cli_app
 
 # mcp 与 ui 是交互式/长驻命令，不映射为分析工具。
@@ -19,18 +21,20 @@ EVIDENCE_PRIMITIVES = {
 }
 
 
-def _command_name(command) -> str:
+def _command_name(command: CommandInfo) -> str:
     """返回命令名；Typer 未显式命名时回落函数名。"""
     if command.name:
         return command.name
     return command.callback.__name__ if command.callback and command.callback.__name__ != "<lambda>" else ""
 
 
-def _command_help(command) -> str:
+def _command_help(command: CommandInfo) -> str:
     """获取命令帮助文案；优先使用显式 help，否则读取回调的 docstring。"""
     if command.help:
         return command.help
-    return inspect.getdoc(command.callback) if command.callback is not None else ""
+    if command.callback is None:
+        return ""
+    return inspect.getdoc(command.callback) or ""
 
 
 def registered_cli_names() -> set[str]:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 AI_OPINIONS_KEY = "ai_opinions"
 SOURCE_AI = "ai"
@@ -33,7 +34,7 @@ def degraded(lane: str, subject: str, model: str, reason: str) -> AiOpinion:
     )
 
 
-def opinions_to_json(opinions: Sequence[AiOpinion]) -> list[dict]:
+def opinions_to_json(opinions: Sequence[AiOpinion]) -> list[dict[str, Any]]:
     return [
         {
             "lane": o.lane,
@@ -48,7 +49,7 @@ def opinions_to_json(opinions: Sequence[AiOpinion]) -> list[dict]:
     ]
 
 
-def attach_ai_opinions(report: dict, opinions: Sequence[AiOpinion]) -> dict:
+def attach_ai_opinions(report: dict[str, Any], opinions: Sequence[AiOpinion]) -> dict[str, Any]:
     """把观点并入报告 JSON；空清单原样返回，否则浅拷贝并添加 ai_opinions，不改动 exit_code。"""
     if not opinions:
         return report

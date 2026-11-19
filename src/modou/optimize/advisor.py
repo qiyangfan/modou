@@ -91,7 +91,7 @@ def build_request_payload(
     }
 
 
-def maybe_fetch_candidates(
+def fetch_candidates(
     config: AdvisorConfig | None,
     statement_sql: str,
     schema_summary: list[dict[str, Any]],
@@ -100,29 +100,9 @@ def maybe_fetch_candidates(
     transport: Transport = default_transport,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> list[IndexCandidate]:
-    """未配置时返回空且不联网；已配置时拉取候选，失败降级为空。"""
+    """未配置时返回空且不联网；已配置时调用 BYOK 端点，失败返回空清单，不阻塞报告。"""
     if config is None:
         return []
-    return fetch_candidates(
-        config,
-        statement_sql,
-        schema_summary,
-        explain_facts=explain_facts,
-        transport=transport,
-        timeout_seconds=timeout_seconds,
-    )
-
-
-def fetch_candidates(
-    config: AdvisorConfig,
-    statement_sql: str,
-    schema_summary: list[dict[str, Any]],
-    *,
-    explain_facts: dict[str, Any] | None = None,
-    transport: Transport = default_transport,
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
-) -> list[IndexCandidate]:
-    """调用 BYOK 端点并解析候选；失败返回空清单，不阻塞报告。"""
     payload = build_request_payload(config, statement_sql, schema_summary, explain_facts=explain_facts)
     try:
         content = complete(config, payload, transport=transport, timeout_seconds=timeout_seconds)
@@ -185,6 +165,5 @@ __all__ = [
     "build_schema_summary",
     "config_from_env",
     "fetch_candidates",
-    "maybe_fetch_candidates",
     "parse_candidate_content",
 ]

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from modou.diff.pipeline import run_verify
 from modou.report.render import EXIT_ERROR
 from modou.snapshot.model import Snapshot, SnapshotMeta
+from modou.verify import run_verify
 
 
 def _snapshot(server_version: str) -> Snapshot:

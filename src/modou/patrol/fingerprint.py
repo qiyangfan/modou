@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 
 import sqlglot
-from sqlglot.tokens import TokenType
+from sqlglot.tokenizer_core import Token, TokenType
 
 _EMBEDDED_DIGITS = re.compile(r"\d+")
 
@@ -40,7 +40,7 @@ def fingerprint(sql: str) -> str:
     return " ".join(out)
 
 
-def _fold_value_list(tokens: list, i: int) -> int | None:
+def _fold_value_list(tokens: list[Token], i: int) -> int | None:
     """IN/VALUES 后接值列表时返回折叠后的下标；子查询不折叠。"""
     if tokens[i].token_type not in (TokenType.IN, TokenType.VALUES):
         return None
@@ -62,18 +62,18 @@ def _fold_value_list(tokens: list, i: int) -> int | None:
         i = _skip_paren_group(tokens, group_at)
 
 
-def _normalize_token(token: object) -> str:
-    token_type = token.token_type  # type: ignore[attr-defined]
+def _normalize_token(token: Token) -> str:
+    token_type = token.token_type
     if token_type in _VALUE_TOKENS:
         return "?"
     if token_type in (TokenType.IDENTIFIER, TokenType.VAR):
         # 标识符保留并小写；内嵌数字替换，使 users_2009 与 users_2010 归为一类
-        bare = token.text.strip('`"').lower()  # type: ignore[attr-defined]
+        bare = token.text.strip('`"').lower()
         return _EMBEDDED_DIGITS.sub("?", bare)
-    return token.text.lower()  # type: ignore[attr-defined]
+    return token.text.lower()
 
 
-def _next_significant(tokens: list, start: int) -> int | None:
+def _next_significant(tokens: list[Token], start: int) -> int | None:
     for index in range(start, len(tokens)):
         if tokens[index].token_type != TokenType.COMMENT:
             return index
@@ -83,9 +83,9 @@ def _next_significant(tokens: list, start: int) -> int | None:
 _VALUE_TOKENS = (TokenType.STRING, TokenType.NUMBER, TokenType.HEX_STRING, TokenType.NULL, TokenType.BIT_STRING)
 
 
-def _is_value_list_head(token: object) -> bool:
+def _is_value_list_head(token: Token) -> bool:
     """判断括号组首个 token 是否为值形态；子查询不折叠，保持不同指纹。"""
-    token_type = token.token_type  # type: ignore[attr-defined]
+    token_type = token.token_type
     if token_type in _VALUE_TOKENS:
         return True
     if token_type in (TokenType.PLUS, TokenType.DASH):
@@ -93,7 +93,7 @@ def _is_value_list_head(token: object) -> bool:
     return token_type == TokenType.L_PAREN  # 行构造器 VALUES ((1,2),(3,4))
 
 
-def _skip_paren_group(tokens: list, open_index: int) -> int:
+def _skip_paren_group(tokens: list[Token], open_index: int) -> int:
     """返回从 open_index 开始的配对括号组之后的下标。"""
     depth = 0
     for index in range(open_index, len(tokens)):

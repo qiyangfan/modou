@@ -27,12 +27,12 @@
 
 ## 四条车道
 
-| 车道 | 命令域 | 解决什么 |
-|---|---|---|
-| 变更验收 | `pack` / `verify` | 变更集打包防漏 → 运维执行前后快照 → 三方 diff 验收（漏执行/错执行/历史漂移） |
-| SQL 优化 | `optimize` | 采集执行计划 → 影子库建索引实测 → 每条建议带「实测提升 X%」或明确标「未验证」 |
-| 规则审核 | `lint` | 26 条 SQL 反模式静态规则（SOAR 子集，零数据库零网络），pre-commit / mapper 批量扫描 |
-| 漂移洞察 | `patrol` | 漂移 diff、未用索引分层判定、慢日志指纹聚合、DDL 锁风险与 gh-ost/pt-osc 建议 |
+| 车道     | 命令域            | 解决什么                                                                            |
+| -------- | ----------------- | ----------------------------------------------------------------------------------- |
+| 变更验收 | `pack` / `verify` | 变更集打包防漏 → 运维执行前后快照 → 三方 diff 验收（漏执行/错执行/历史漂移）        |
+| SQL 优化 | `optimize`        | 采集执行计划 → 影子库建索引实测 → 每条建议带「实测提升 X%」或明确标「未验证」       |
+| 规则审核 | `lint`            | 26 条 SQL 反模式静态规则（SOAR 子集，零数据库零网络），pre-commit / mapper 批量扫描 |
+| 漂移洞察 | `patrol`          | 漂移 diff、未用索引分层判定、慢日志指纹聚合、DDL 锁风险与 gh-ost/pt-osc 建议        |
 
 两个端到端案例（含真实命令输出）：[变更交棒漏执行验收](examples/changeset-demo/) ·
 [索引优化实证](examples/optimize-demo/)。
@@ -99,24 +99,24 @@ modou ui --report report.json
 
 ## 文档
 
-| 文档 | 内容 |
-|---|---|
-| [docs/quickstart.md](docs/quickstart.md) | 快速上手：四车道最小链路 |
+| 文档                                             | 内容                                                |
+| ------------------------------------------------ | --------------------------------------------------- |
+| [docs/quickstart.md](docs/quickstart.md)         | 快速上手：四车道最小链路                            |
 | [docs/changeset-spec.md](docs/changeset-spec.md) | 变更集规范：目录结构、manifest、DELIMITER、多库约定 |
-| [docs/rules.md](docs/rules.md) | 审核规则清单（26 条，可 `modou.toml` 配置） |
-| [docs/demo-agent.md](docs/demo-agent.md) | MCP 接入与 AI 委托工作流 |
-| [docs/formats.md](docs/formats.md) | 数据格式契约（快照/报告/退出码语义） |
-| [docs/architecture.md](docs/architecture.md) | 架构北极星：内核三件套、模块地图、风险 |
-| [docs/goals.md](docs/goals.md) | 目标体系与里程碑验收判据 |
-| [docs/adr/](docs/adr/) | 架构决策记录（ADR-0001~0009） |
+| [docs/rules.md](docs/rules.md)                   | 审核规则清单（26 条，可 `modou.toml` 配置）         |
+| [docs/demo-agent.md](docs/demo-agent.md)         | MCP 接入与 AI 委托工作流                            |
+| [docs/formats.md](docs/formats.md)               | 数据格式契约（快照/报告/退出码语义）                |
+| [docs/architecture.md](docs/architecture.md)     | 架构北极星：内核三件套、模块地图、风险              |
+| [docs/goals.md](docs/goals.md)                   | 目标体系与里程碑验收判据                            |
+| [docs/adr/](docs/adr/)                           | 架构决策记录（ADR-0001~0009）                       |
 
 ## 治理
 
-| 文件 | 职责 |
-|---|---|
-| [openspec/project.md](openspec/project.md) | 宪法：不可协商红线与工程口径 |
-| [AGENTS.md](AGENTS.md) | 工作区指引：目录、门禁命令、代码规范 |
-| [.github/workflows/ci.yml](.github/workflows/ci.yml) | CI：Python 内核门禁 + ui 门禁 |
+| 文件                                                 | 职责                                 |
+| ---------------------------------------------------- | ------------------------------------ |
+| [openspec/project.md](openspec/project.md)           | 宪法：不可协商红线与工程口径         |
+| [AGENTS.md](AGENTS.md)                               | 工作区指引：目录、门禁命令、代码规范 |
+| [.github/workflows/ci.yml](.github/workflows/ci.yml) | CI：Python 内核门禁 + ui 门禁        |
 
 ## 家族
 

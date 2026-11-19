@@ -15,7 +15,6 @@ from modou.optimize.advisor import (
     build_schema_summary,
     config_from_env,
     fetch_candidates,
-    maybe_fetch_candidates,
 )
 from modou.snapshot.model import (
     ColumnDef,
@@ -135,7 +134,7 @@ class TestFetchCandidates:
             calls.append(1)
             return {}
 
-        result = maybe_fetch_candidates(None, "SELECT 1 FROM t", [], transport=fake_transport)
+        result = fetch_candidates(None, "SELECT 1 FROM t", [], transport=fake_transport)
         assert result == []
         assert calls == []
 

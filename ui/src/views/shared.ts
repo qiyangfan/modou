@@ -16,7 +16,7 @@ export function card(...children: HTMLElement[]): HTMLElement {
   return box;
 }
 
-export function detailTable(
+function detailTable(
   details: { path: string; expected: string; actual: string }[],
 ): HTMLElement {
   const table = el("table");
@@ -33,6 +33,25 @@ export function detailTable(
     table.appendChild(row);
   }
   return table;
+}
+
+interface DetailCardSubject {
+  object_type: string;
+  object_name: string;
+  dimensions?: string[];
+  details?: { path: string; expected: string; actual: string }[];
+}
+
+export function detailCard(
+  badge: HTMLElement,
+  subject: DetailCardSubject,
+): HTMLElement {
+  return card(
+    badge,
+    el("strong", undefined, `${subject.object_type} ${subject.object_name}`),
+    el("div", "muted", `维度：${(subject.dimensions ?? []).join("、")}`),
+    detailTable(subject.details ?? []),
+  );
 }
 
 export function rowsLine(

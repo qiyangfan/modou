@@ -13,13 +13,13 @@ cryptography 50.0.2、pytest 9.1.1、pydantic（传递依赖）2.14.1 均已是�
 
 **真实缺口在 UI 工具链**（package.json 声明 vs npm 最新）：
 
-| 包 | 声明 | 最新稳定 | 差距 |
-|---|---|---|---|
-| eslint | ^9.0.0 | 10.13.0 | 跨大版本；**eslint 9 已 EOL**，安全补丁不再回移（硬理由） |
-| vitest | ^4.0.0 | 5.0.5 | 跨大版本（2026-09-28 发布，性能 + 修复长期缺陷） |
-| typescript | ^5.9.0 | 7.0.2 | 目标 6.x 桥接版，**不升 7**（理由见"受影响决策"） |
-| jsdom | ^27.0.0 | 30.1.3 | 跨大版本，随 vitest 5 兼容矩阵 |
-| vite / typescript-eslint | ^8 | 8.3.4 / 8.71.2 | ^ 范围内刷新 |
+| 包                       | 声明    | 最新稳定       | 差距                                                      |
+| ------------------------ | ------- | -------------- | --------------------------------------------------------- |
+| eslint                   | ^9.0.0  | 10.13.0        | 跨大版本；**eslint 9 已 EOL**，安全补丁不再回移（硬理由） |
+| vitest                   | ^4.0.0  | 5.0.5          | 跨大版本（2026-09-28 发布，性能 + 修复长期缺陷）          |
+| typescript               | ^5.9.0  | 7.0.2          | 目标 6.x 桥接版，**不升 7**（理由见"受影响决策"）         |
+| jsdom                    | ^27.0.0 | 30.1.3         | 跨大版本，随 vitest 5 兼容矩阵                            |
+| vite / typescript-eslint | ^8      | 8.3.4 / 8.71.2 | ^ 范围内刷新                                              |
 
 **Node 对齐缺口**：CI 双 job 用 Node 24（家族 web 门禁标准），而 ui 的
 @types/node ^26.6.5 已按 Node 26 API 声明——类型面与运行面不一致。Node 26
@@ -27,13 +27,13 @@ cryptography 50.0.2、pytest 9.1.1、pydantic（传递依赖）2.14.1 均已是�
 
 **手搓盘点（本提案核心关切，逐处查证，结论：四处手搓全部维持，一处 ADR 漂移须收档）**：
 
-| 手搓点 | 候选原生替代 | 查证结论 |
-|---|---|---|
-| `replay/container.py`（150 行 podman/docker CLI 编排） | testcontainers 4.15 | **维持手搓**：重依赖红线（零额外依赖、podman/docker 同构、本地 CI 行为一致）；但 ADR-0006 写的是 testcontainers，**ADR 与实现漂移，须修订入档**防后人按 ADR"纠正"实现 |
-| `replay/splitter.py`（205 行 DELIMITER 感知词法切分） | sqlglot parse / tokenize | **维持手搓**：DELIMITER 是 mysql 客户端指令而非服务器 SQL，sqlglot 原生不支持（sqlglot issue #2587 佐证：需自行跟踪自定义分隔符） |
-| `ai/client.py`（131 行 stdlib urllib BYOK 客户端） | openai SDK 3.35 | **维持手搓**：SDK 进 core 违"核心秒级安装"（ADR-0006），进 optional 改变 BYOK 内置定位；对各家 OpenAI 兼容端点，SDK 强校验反而增加兼容风险 |
-| `server/surface_map.py`（CLI→MCP 1:1 映射） | fastmcp CLI 集成 | **维持手搓**：fastmcp 无 typer/click→MCP 转换器（方向相反：generate-cli 是从 MCP 工具生成 CLI）；且映射是 specs/mcp-surface 冻结契约 |
-| pyproject 顶层 `cryptography`（源码与测试零 import） | — | **保留**：实为 pymysql caching_sha2_password（MySQL 8 默认认证插件）的运行时伴随依赖，加注释防误删 |
+| 手搓点                                                 | 候选原生替代             | 查证结论                                                                                                                                                              |
+| ------------------------------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `replay/container.py`（150 行 podman/docker CLI 编排） | testcontainers 4.15      | **维持手搓**：重依赖红线（零额外依赖、podman/docker 同构、本地 CI 行为一致）；但 ADR-0006 写的是 testcontainers，**ADR 与实现漂移，须修订入档**防后人按 ADR"纠正"实现 |
+| `replay/splitter.py`（205 行 DELIMITER 感知词法切分）  | sqlglot parse / tokenize | **维持手搓**：DELIMITER 是 mysql 客户端指令而非服务器 SQL，sqlglot 原生不支持（sqlglot issue #2587 佐证：需自行跟踪自定义分隔符）                                     |
+| `ai/client.py`（131 行 stdlib urllib BYOK 客户端）     | openai SDK 3.35          | **维持手搓**：SDK 进 core 违"核心秒级安装"（ADR-0006），进 optional 改变 BYOK 内置定位；对各家 OpenAI 兼容端点，SDK 强校验反而增加兼容风险                            |
+| `server/surface_map.py`（CLI→MCP 1:1 映射）            | fastmcp CLI 集成         | **维持手搓**：fastmcp 无 typer/click→MCP 转换器（方向相反：generate-cli 是从 MCP 工具生成 CLI）；且映射是 specs/mcp-surface 冻结契约                                  |
+| pyproject 顶层 `cryptography`（源码与测试零 import）   | —                        | **保留**：实为 pymysql caching_sha2_password（MySQL 8 默认认证插件）的运行时伴随依赖，加注释防误删                                                                    |
 
 另：Python 3.15.0 已发布（2026-10-09）。**不抬地板**（>=3.12 保持）：3.14 的
 t-strings（PEP 750）不替代任何手搓模块——上下文工程是切片/分包/注入逻辑而非

@@ -1,6 +1,6 @@
 """按序合并变更集，并附带破坏性预警与大表锁风险标注。
 
-预警不构成验收结论；解析失败只产生 unparseable 提示，不阻塞打包。
+预警不构成验收结论；解析失败只产生 unparseable 提示（报告契约值），不阻塞打包。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ class ChangesetValidationError(Exception):
 class StatementWarning:
     source_file: str
     statement_index: int  # 打包产物内全局序号（1 起，与回放序号一致）
-    kind: str  # destructive / lock_risk / unparseable
+    kind: str  # destructive / lock_risk / unparseable（报告契约值，勿改拼写）
     level: str  # high / medium / info
     message: str  # 人读文本（中文）
 

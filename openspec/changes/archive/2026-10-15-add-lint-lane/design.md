@@ -23,34 +23,34 @@ Bytebase 分类（Naming / Anti-pattern / Indexing / Locking / Backward-incompat
 级别语义：error=正确性/高危问题；warning=性能或工程风险；info=规范建议。
 默认任意已启用规则命中即影响退出码（见 §4），级别用于展示与按级过滤。
 
-| ID | 名称 | 一句话 | 级别 |
-|---|---|---|---|
-| ARG.001 | 前缀通配 LIKE | `LIKE '%x'` 无法走索引 | warning |
-| ARG.004 | IN (NULL) | 对 NULL 用 IN 永不为真 | error |
-| ARG.005 | IN 列表过多 | 超阈值建议 BETWEEN/临时表 | warning |
-| ARG.006 | 对列判 NULL | IS NULL 可能全表扫 | info |
-| ARG.011 | 负向查询 | NOT IN/NOT LIKE 全表扫 | warning |
-| CLA.001 | SELECT 无 WHERE | 全表查询检查 | warning |
-| CLA.002 | ORDER BY RAND() | 随机排序效率极低 | error |
-| CLA.003 | 大 OFFSET 分页 | 深翻页建议书签方式 | warning |
-| CLA.015 | UPDATE 无 WHERE | 全表更新检查 | error |
-| COL.001 | SELECT * | 表结构变更时行为漂移 | warning |
-| COL.002 | INSERT 未指定列名 | 须显式列名 | warning |
-| COL.005 | 列缺注释 | CREATE TABLE 列须 COMMENT | info |
-| COL.013 | TIMESTAMP 无默认值 | 缺省值缺失影响在线变更 | warning |
-| DIS.001 | 多余 DISTINCT | 含主键时 DISTINCT 无效 | info |
-| FUN.001 | WHERE 列上函数 | 列上函数/运算使索引失效 | warning |
-| FUN.005 | COUNT(col) | 应用 COUNT(*) | info |
-| JOI.001 | 逗号与 JOIN 混用 | 易引入笛卡尔积错误 | warning |
-| KEY.002 | 无主键/唯一键 | 阻塞在线变更工具 | error |
-| KEY.005 | 索引数过多 | 超阈值告警 | warning |
-| KEY.007 | 主键须整型 | 建议整型无符号主键 | warning |
-| LCK.002 | INSERT ON DUPLICATE KEY UPDATE | 自增暴涨/主从不一致 | warning |
-| RES.002 | LIMIT 无 ORDER BY | 结果集不确定 | warning |
-| RES.003 | UPDATE/DELETE 带 LIMIT | 主从不一致风险 | error |
-| SEC.002 | 疑似明文密码列 | 密码类列名+类型启发 | error |
-| STA.003 | 索引命名前缀 | 二级 `idx_` / 唯一 `uk_` | info |
-| SUB.002 | UNION → UNION ALL | 无需去重时更快 | info |
+| ID      | 名称                           | 一句话                    | 级别    |
+| ------- | ------------------------------ | ------------------------- | ------- |
+| ARG.001 | 前缀通配 LIKE                  | `LIKE '%x'` 无法走索引    | warning |
+| ARG.004 | IN (NULL)                      | 对 NULL 用 IN 永不为真    | error   |
+| ARG.005 | IN 列表过多                    | 超阈值建议 BETWEEN/临时表 | warning |
+| ARG.006 | 对列判 NULL                    | IS NULL 可能全表扫        | info    |
+| ARG.011 | 负向查询                       | NOT IN/NOT LIKE 全表扫    | warning |
+| CLA.001 | SELECT 无 WHERE                | 全表查询检查              | warning |
+| CLA.002 | ORDER BY RAND()                | 随机排序效率极低          | error   |
+| CLA.003 | 大 OFFSET 分页                 | 深翻页建议书签方式        | warning |
+| CLA.015 | UPDATE 无 WHERE                | 全表更新检查              | error   |
+| COL.001 | SELECT *                       | 表结构变更时行为漂移      | warning |
+| COL.002 | INSERT 未指定列名              | 须显式列名                | warning |
+| COL.005 | 列缺注释                       | CREATE TABLE 列须 COMMENT | info    |
+| COL.013 | TIMESTAMP 无默认值             | 缺省值缺失影响在线变更    | warning |
+| DIS.001 | 多余 DISTINCT                  | 含主键时 DISTINCT 无效    | info    |
+| FUN.001 | WHERE 列上函数                 | 列上函数/运算使索引失效   | warning |
+| FUN.005 | COUNT(col)                     | 应用 COUNT(*)             | info    |
+| JOI.001 | 逗号与 JOIN 混用               | 易引入笛卡尔积错误        | warning |
+| KEY.002 | 无主键/唯一键                  | 阻塞在线变更工具          | error   |
+| KEY.005 | 索引数过多                     | 超阈值告警                | warning |
+| KEY.007 | 主键须整型                     | 建议整型无符号主键        | warning |
+| LCK.002 | INSERT ON DUPLICATE KEY UPDATE | 自增暴涨/主从不一致       | warning |
+| RES.002 | LIMIT 无 ORDER BY              | 结果集不确定              | warning |
+| RES.003 | UPDATE/DELETE 带 LIMIT         | 主从不一致风险            | error   |
+| SEC.002 | 疑似明文密码列                 | 密码类列名+类型启发       | error   |
+| STA.003 | 索引命名前缀                   | 二级 `idx_` / 唯一 `uk_`  | info    |
+| SUB.002 | UNION → UNION ALL              | 无需去重时更快            | info    |
 
 数值阈值（可配置）：IN 列表元素默认 >100；分页 OFFSET 默认 >10000；单表二级
 索引数默认 >10。

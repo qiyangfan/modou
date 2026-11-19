@@ -13,6 +13,12 @@ function stubFetchBodies(bodies: unknown[]): void {
   );
 }
 
+function requireApp(): HTMLElement {
+  const app = document.getElementById("app");
+  if (app === null) throw new Error("missing #app");
+  return app;
+}
+
 describe("index entry", () => {
   beforeEach(() => {
     document.body.replaceChildren();
@@ -38,17 +44,17 @@ describe("index entry", () => {
     ]);
     await import("../src/index");
     await new Promise((r) => setTimeout(r, 0));
-    const app = document.getElementById("app")!;
+    const app = requireApp();
     expect(app.querySelectorAll(".report-item").length).toBe(1);
-    expect(app.querySelector("main")!.textContent).toContain("命中 0 条");
+    expect(app.querySelector("main")?.textContent).toContain("命中 0 条");
   });
 
   it("null body degrades to load-error message, not a crash", async () => {
     stubFetchBodies([null]);
     await import("../src/index");
     await new Promise((r) => setTimeout(r, 0));
-    const app = document.getElementById("app")!;
-    expect(app.querySelector("main")!.textContent).toContain(
+    const app = requireApp();
+    expect(app.querySelector("main")?.textContent).toContain(
       "无法加载报告数据",
     );
   });
@@ -57,7 +63,7 @@ describe("index entry", () => {
     stubFetchBodies([{ wrong: [] }]);
     await import("../src/index");
     await new Promise((r) => setTimeout(r, 0));
-    const app = document.getElementById("app")!;
-    expect(app.querySelector("main")!.textContent).toContain("未加载任何报告");
+    const app = requireApp();
+    expect(app.querySelector("main")?.textContent).toContain("未加载任何报告");
   });
 });

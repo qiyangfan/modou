@@ -34,15 +34,15 @@ exists, the review and insight lanes reuse the same kernel at marginal cost.
 
 ## Four lanes
 
-| Lane | Commands | What it solves |
-|---|---|---|
-| Change verification | `pack` / `verify` | Bundle change sets to prevent misses → before/after snapshots → three-way diff (missed / wrong / historical drift) |
-| SQL optimization | `optimize` | Collect plans → build indexes on a shadow database → every suggestion tagged "measured improvement X%" or explicitly "unverified" |
-| Rule review | `lint` | 26 static SQL anti-pattern rules (SOAR subset; no database, no network), for pre-commit / mapper batch scans |
-| Drift insight | `patrol` | Drift diff, unused-index tiering, slow-log fingerprint aggregation, DDL lock risk with gh-ost/pt-osc advice |
+| Lane                | Commands          | What it solves                                                                                                                    |
+| ------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Change verification | `pack` / `verify` | Bundle change sets to prevent misses → before/after snapshots → three-way diff (missed / wrong / historical drift)                |
+| SQL optimization    | `optimize`        | Collect plans → build indexes on a shadow database → every suggestion tagged "measured improvement X%" or explicitly "unverified" |
+| Rule review         | `lint`            | 26 static SQL anti-pattern rules (SOAR subset; no database, no network), for pre-commit / mapper batch scans                      |
+| Drift insight       | `patrol`          | Drift diff, unused-index tiering, slow-log fingerprint aggregation, DDL lock risk with gh-ost/pt-osc advice                       |
 
-Two end-to-end cases with real command output: [missed-statement verification](
-examples/changeset-demo/) · [index optimization evidence](examples/optimize-demo/).
+Two end-to-end cases with real command output: [missed-statement verification](examples/changeset-demo/)
+· [index optimization evidence](examples/optimize-demo/).
 
 ## Install
 
@@ -114,16 +114,16 @@ sensitive; the trust dividend is local).
 
 ## Docs
 
-| Doc | Contents |
-|---|---|
-| [docs/quickstart.md](docs/quickstart.md) | Quick start: minimal flow of all four lanes |
+| Doc                                              | Contents                                                                 |
+| ------------------------------------------------ | ------------------------------------------------------------------------ |
+| [docs/quickstart.md](docs/quickstart.md)         | Quick start: minimal flow of all four lanes                              |
 | [docs/changeset-spec.md](docs/changeset-spec.md) | Change set spec: layout, manifest, DELIMITER, multi-database conventions |
-| [docs/rules.md](docs/rules.md) | Review rule catalog (26 rules, configurable via `modou.toml`) |
-| [docs/demo-agent.md](docs/demo-agent.md) | MCP integration and AI delegation workflows |
-| [docs/formats.md](docs/formats.md) | Data format contracts (snapshot / report / exit-code semantics) |
-| [docs/architecture.md](docs/architecture.md) | Architecture north star: kernel trio, module map, risks |
-| [docs/goals.md](docs/goals.md) | Goals and milestone acceptance criteria |
-| [docs/adr/](docs/adr/) | Architecture decision records (ADR-0001~0009) |
+| [docs/rules.md](docs/rules.md)                   | Review rule catalog (26 rules, configurable via `modou.toml`)            |
+| [docs/demo-agent.md](docs/demo-agent.md)         | MCP integration and AI delegation workflows                              |
+| [docs/formats.md](docs/formats.md)               | Data format contracts (snapshot / report / exit-code semantics)          |
+| [docs/architecture.md](docs/architecture.md)     | Architecture north star: kernel trio, module map, risks                  |
+| [docs/goals.md](docs/goals.md)                   | Goals and milestone acceptance criteria                                  |
+| [docs/adr/](docs/adr/)                           | Architecture decision records (ADR-0001~0009)                            |
 
 ## License
 

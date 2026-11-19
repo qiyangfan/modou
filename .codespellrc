@@ -1,0 +1,4 @@
+[codespell]
+skip = .git,.venv,node_modules,dist,build,coverage,*.lock,uv.lock,package-lock.json
+# unparseable 是 pack 报告 warning.kind 的既有契约值，不能按拼写纠正。
+ignore-words-list = unparseable

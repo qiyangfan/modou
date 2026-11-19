@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any, overload
 
 REPORT_VERSION = 1
 
@@ -24,12 +25,12 @@ class SummaryInputError(Exception):
 
 
 def summarize_reports(
-    drift: dict | None,
-    unused: dict | None,
-    slowlog: dict | None,
+    drift: dict[str, Any] | None,
+    unused: dict[str, Any] | None,
+    slowlog: dict[str, Any] | None,
     *,
     inputs: dict[str, str | None] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """聚合巡检报告；类型或字段形状错误时抛出 ``SummaryInputError``。"""
     loaded = {"drift": drift, "unused": unused, "slowlog": slowlog}
     if all(report is None for report in loaded.values()):
@@ -44,7 +45,7 @@ def summarize_reports(
                 f"{signal} slot expects report_kind={_KIND_BY_SIGNAL[signal]!r}, got {report.get('report_kind')!r}"
             )
 
-    signals: dict = {}
+    signals: dict[str, Any] = {}
     if drift is not None:
         summary = _section(drift, "summary", dict, "drift")
         databases = _section(drift, "databases", dict, "drift")
@@ -119,7 +120,17 @@ def summarize_reports(
     }
 
 
-def _section(report: dict, key: str, expected: type, signal: str) -> dict | list:
+@overload
+def _section(report: dict[str, Any], key: str, expected: type[dict[str, Any]], signal: str) -> dict[str, Any]: ...
+
+
+@overload
+def _section(report: dict[str, Any], key: str, expected: type[list[Any]], signal: str) -> list[Any]: ...
+
+
+def _section(
+    report: dict[str, Any], key: str, expected: type[dict[str, Any]] | type[list[Any]], signal: str
+) -> dict[str, Any] | list[Any]:
     """取报告的消费段并校验形状（缺席按空处理，类型不符 = 输入错误）。"""
     value = report.get(key)
     if value is None:
@@ -129,14 +140,14 @@ def _section(report: dict, key: str, expected: type, signal: str) -> dict | list
     return value
 
 
-def _exit_code(report: dict, signal: str) -> int:
+def _exit_code(report: dict[str, Any], signal: str) -> int:
     value = report.get("exit_code", 0)
     if isinstance(value, bool) or not isinstance(value, (int, float)) or int(value) != value:
         raise SummaryInputError(f"{signal} report exit_code must be an integer, got {value!r}")
     return int(value)
 
 
-def summarize_render(report: dict) -> str:
+def summarize_render(report: dict[str, Any]) -> str:
     """生成人读摘要；观点区由 opinions 模块追加。"""
     lines = ["墨斗综合巡检报告", "＝" * 40]
     signals = report.get("signals") or {}

@@ -86,7 +86,7 @@ class TestLintAiReview:
     def _spy_installed(self, monkeypatch, opinions):
         calls: list[dict] = []
 
-        def fake_review(units, hits, config, **kwargs):
+        def fake_review(units, hits, config, **_):
             calls.append({"subjects": [u.subject for u in units], "model": config.model})
             return opinions
 
@@ -99,7 +99,7 @@ class TestLintAiReview:
         monkeypatch.delenv("MOUDO_AI_API_KEY", raising=False)
         monkeypatch.delenv("MOUDO_AI_MODEL", raising=False)
 
-        def must_not_call(*args, **kwargs):
+        def must_not_call(*args, **_):
             raise AssertionError("AI review must not be called without BYOK config")
 
         monkeypatch.setattr("modou.ai.lane_lint.review_residual", must_not_call)

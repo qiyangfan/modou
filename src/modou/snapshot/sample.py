@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 from decimal import Decimal
 
-from modou.snapshot.model import TableDef
+from modou.snapshot.model import IndexPart, TableDef
 
 BINARY_TAG = "$binary"
 
@@ -59,7 +59,7 @@ def has_usable_primary_key(table: TableDef) -> bool:
     return bool(_orderable_key_parts(primary.parts))
 
 
-def _orderable_key_parts(parts: list) -> list[str]:
+def _orderable_key_parts(parts: list[IndexPart]) -> list[str]:
     """主键中可排序的普通列（排除函数/表达式部分）。"""
     return [part.column for part in parts if part.column]
 

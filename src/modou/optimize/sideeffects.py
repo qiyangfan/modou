@@ -68,19 +68,25 @@ def fk_required_index_names(table: TableDef) -> set[str]:
 def find_redundant_pairs(pool: list[IndexView]) -> list[tuple[IndexView, IndexView, str]]:
     """两两比较索引，返回冗余方、主导方和情形；重复索引按输入顺序判定。"""
     redundant: list[tuple[IndexView, IndexView, str]] = []
-    comparable = [view for view in pool if not view.expression_only and view.keys]
+    comparable: list[tuple[IndexView, list[tuple[str, int | None]]]] = []
+    for view in pool:
+        keys = view.keys
+        if view.expression_only or not keys:
+            continue
+        comparable.append((view, keys))
     for i in range(len(comparable)):
         for j in range(i + 1, len(comparable)):
-            first, second = comparable[i], comparable[j]
-            if first.keys == second.keys:
+            first, first_keys = comparable[i]
+            second, second_keys = comparable[j]
+            if first_keys == second_keys:
                 redundant.append((first, second, "duplicate"))
                 continue
-            if _is_prefix(first.keys, second.keys):
+            if _is_prefix(first_keys, second_keys):
                 if first.unique:
                     redundant.append((second, first, "unique_prefix"))
                 else:
                     redundant.append((first, second, "prefix_non_unique"))
-            elif _is_prefix(second.keys, first.keys):
+            elif _is_prefix(second_keys, first_keys):
                 if second.unique:
                     redundant.append((first, second, "unique_prefix"))
                 else:

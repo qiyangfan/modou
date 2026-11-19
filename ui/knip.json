@@ -1,0 +1,5 @@
+{
+  "entry": ["tests/**/*.test.ts"],
+  "project": ["src/**/*.ts", "tests/**/*.ts"],
+  "ignoreDependencies": ["@commitlint/cli"]
+}

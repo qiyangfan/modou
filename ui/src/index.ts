@@ -93,10 +93,12 @@ function buildReportItem(
 ): HTMLElement {
   const item = document.createElement("div");
   item.className = "report-item";
-  item.appendChild(document.createElement("div")).className = "kind";
-  item.lastChild!.textContent = `${KIND_LABELS[summary.kind] ?? summary.kind}`;
-  item.appendChild(document.createElement("div")).className = "sub";
-  item.lastChild!.textContent = summary.source;
+  const kind = item.appendChild(document.createElement("div"));
+  kind.className = "kind";
+  kind.textContent = `${KIND_LABELS[summary.kind] ?? summary.kind}`;
+  const sub = item.appendChild(document.createElement("div"));
+  sub.className = "sub";
+  sub.textContent = summary.source;
   item.addEventListener("click", () => {
     context.sidebar
       .querySelectorAll(".report-item")

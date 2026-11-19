@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+from typing import Any
 
 import pymysql.connections
 
@@ -31,7 +32,7 @@ _NESTED_BLOCK_KEYS = (
 class ExplainPlan:
     """EXPLAIN FORMAT=JSON 的解析结果；代价缺失时 query_cost 为 None。"""
 
-    def __init__(self, query_cost: float | None, table_accesses: list[dict]) -> None:
+    def __init__(self, query_cost: float | None, table_accesses: list[dict[str, Any]]) -> None:
         self.query_cost = query_cost
         self.table_accesses = table_accesses
 
@@ -68,12 +69,12 @@ def parse_explain_json(text: str) -> ExplainPlan:
         query_cost = None if raw_cost is None else float(raw_cost)
     except (TypeError, ValueError):
         query_cost = None
-    accesses: list[dict] = []
+    accesses: list[dict[str, Any]] = []
     _collect_tables(data.get("query_block", {}), accesses)
     return ExplainPlan(query_cost=query_cost, table_accesses=accesses)
 
 
-def _collect_tables(node: object, out: list[dict]) -> None:
+def _collect_tables(node: object, out: list[dict[str, Any]]) -> None:
     if not isinstance(node, dict):
         return
     if "table_name" in node:

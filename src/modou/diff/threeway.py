@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any, cast
 
 from modou.snapshot.model import (
     CheckDef,
@@ -145,15 +146,19 @@ def _diff_object(
     db_name: str,
     object_type: str,
     name: str,
-    b_obj: object | None,
-    e_obj: object | None,
-    a_obj: object | None,
+    b_obj: TableDef | ObjectDef | None,
+    e_obj: TableDef | ObjectDef | None,
+    a_obj: TableDef | ObjectDef | None,
 ) -> list[ObjectConclusion]:
     """按维度分类单个对象，按类别聚合为 0~3 条结论。"""
     if object_type == "table":
-        dimension_findings = _table_dimension_findings(b_obj, e_obj, a_obj)  # type: ignore[arg-type]
+        dimension_findings = _table_dimension_findings(
+            cast(TableDef | None, b_obj), cast(TableDef | None, e_obj), cast(TableDef | None, a_obj)
+        )
     else:
-        dimension_findings = _definition_dimension_findings(b_obj, e_obj, a_obj)  # type: ignore[arg-type]
+        dimension_findings = _definition_dimension_findings(
+            cast(ObjectDef | None, b_obj), cast(ObjectDef | None, e_obj), cast(ObjectDef | None, a_obj)
+        )
 
     by_kind: dict[str, ObjectConclusion] = {}
     for kind, dimension, details in dimension_findings:
@@ -206,7 +211,7 @@ def _table_dimension_findings(
         )
         return findings
 
-    dimension_specs: list[tuple[str, dict, dict, dict, object]] = []
+    dimension_specs: list[tuple[str, dict[str, Any], dict[str, Any], dict[str, Any], Callable[[Any], str]]] = []
     # (维度名, B/E/A 状态, 渲染函数)；state 为「条目名 → 定义」
     dimension_specs.append(
         (
@@ -216,7 +221,7 @@ def _table_dimension_findings(
             _by_name(a_table.columns),
             _render_column,
         )
-    )  # type: ignore[arg-type]
+    )
     dimension_specs.append(
         (
             "indexes",
@@ -225,7 +230,7 @@ def _table_dimension_findings(
             _by_name(a_table.indexes),
             _render_index,
         )
-    )  # type: ignore[arg-type]
+    )
     dimension_specs.append(
         (
             "foreign_keys",
@@ -234,7 +239,7 @@ def _table_dimension_findings(
             _by_name(a_table.foreign_keys),
             _render_foreign_key,
         )
-    )  # type: ignore[arg-type]
+    )
     dimension_specs.append(
         (
             "check_constraints",
@@ -243,7 +248,7 @@ def _table_dimension_findings(
             _by_name(a_table.check_constraints),
             _render_check,
         )
-    )  # type: ignore[arg-type]
+    )
 
     # 逐条目比较 E→A，并按该条目在 B 中的状态归因；整维度比较会把「建表后漏加一列」误判为错执行
     for dimension, b_state, e_state, a_state, render in dimension_specs:
@@ -316,15 +321,15 @@ def _definition_dimension_findings(
     ]
 
 
-def _by_name(items: list) -> dict:
+def _by_name(items: list[Any]) -> dict[str, Any]:
     return {item.name: item for item in items}
 
 
 def _classify_items(
     dimension: str,
-    b_state: dict,
-    e_state: dict,
-    a_state: dict,
+    b_state: dict[str, Any],
+    e_state: dict[str, Any],
+    a_state: dict[str, Any],
     render: Callable[[object], str],
 ) -> list[tuple[str, DimensionDiff]]:
     """维度内逐条目分类：只看 E 与 A 有差异的条目，按该条目在 B 中的状态归因。"""
@@ -348,7 +353,7 @@ def _classify_items(
     return findings
 
 
-def _render_table_options(options: tuple) -> str:
+def _render_table_options(options: tuple[Any, ...]) -> str:
     engine, collation, comment, create_options = options
     return f"engine={engine} collation={collation} comment={comment!r} options={create_options!r}"
 

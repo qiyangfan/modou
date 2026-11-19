@@ -109,11 +109,11 @@ class TestOptimizeShadowE2E:
         target_db = unique_db("opt_ai_t")
         snapshot = _capture_renamed(mysql_server, source_db, target_db, sample_rows=1000)
 
-        def fake_advisor(*args, **kwargs):
+        def fake_advisor(*args, **_):
             # 模拟 AI 建议：对只有 3 个取值的 status 建独立索引
             return [IndexCandidate(None, "orders", ["status"], "AI 建议索引", source="ai")]
 
-        monkeypatch.setattr(pipeline_module, "maybe_fetch_candidates", fake_advisor)
+        monkeypatch.setattr(pipeline_module, "fetch_candidates", fake_advisor)
         outcome = run_optimize(
             # 规则候选在 amount，AI 建议在 status，不会被去重；低选择性索引必须被实证拦下
             ["SELECT * FROM orders WHERE amount > 100"],

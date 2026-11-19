@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import NoReturn
+from typing import Annotated, Any, NoReturn
 
 import pymysql.err
 import typer
@@ -14,7 +14,6 @@ from modou import __version__
 from modou.ai.client import config_from_env as ai_config_from_env
 from modou.changeset.pack import ChangesetValidationError, pack_changeset
 from modou.db import MysqlParams
-from modou.diff.pipeline import VerifyInputError, run_verify
 from modou.lint import PARSE_RULE_ID, RULES, lint_paths
 from modou.lint import render_text as render_lint_text
 from modou.lint.config import LintConfigError, load_lint_config
@@ -24,13 +23,21 @@ from modou.patrol.unused_indexes import DEFAULT_OBSERVE_DAYS
 from modou.replay.splitter import split_statements
 from modou.report.opinions import AiOpinion, attach_ai_opinions, render_opinions_section
 from modou.snapshot.capture import capture_to_file
-from modou.snapshot.model import snapshot_from_json
+from modou.snapshot.model import Snapshot, snapshot_from_json
+from modou.verify import VerifyInputError, run_verify
 
 app = typer.Typer(
     name="modou",
     help="墨斗：数据库工程化的本地层——变更验收、SQL 优化、规则审核、漂移洞察。",
     no_args_is_help=True,
 )
+
+MysqlHostOption = Annotated[str | None, typer.Option("--host")]
+MysqlPortOption = Annotated[int | None, typer.Option("--port", min=1, max=65535)]
+MysqlUserOption = Annotated[str | None, typer.Option("--user")]
+MysqlPasswordOption = Annotated[
+    str | None, typer.Option("--password", help="MySQL password (env: MOUDO_MYSQL_PASSWORD).")
+]
 
 
 # 空 callback 强制子命令模式；否则单命令 Typer 会把子命令名当作参数
@@ -81,14 +88,7 @@ def snapshot_capture(
     if report_json is not None:
         from modou.snapshot.summary import snapshot_summary
 
-        try:
-            report_json.write_text(
-                json.dumps(snapshot_summary(snapshot), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-            )
-        except OSError as exc:
-            typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
-        typer.echo(f"report -> {report_json}", err=True)
+        _write_json_report(report_json, snapshot_summary(snapshot))
     sampled_note = f", sample-rows={sample_rows}" if sample_rows else ""
     typer.echo(
         f"captured {len(snapshot.databases)} database(s) "
@@ -252,16 +252,7 @@ def verify(
         )
 
     if report_json is not None:
-        try:
-            report_json.write_text(
-                json.dumps(attach_ai_opinions(outcome.report_json, opinions), ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            # 报告不可写属环境错误，退出码 2，避免 traceback 覆盖验收结论
-            typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
-        typer.echo(f"report -> {report_json}", err=True)
+        _write_json_report(report_json, attach_ai_opinions(outcome.report_json, opinions))
     typer.echo(outcome.render() + render_opinions_section(opinions))
     raise typer.Exit(code=outcome.exit_code)
 
@@ -294,11 +285,7 @@ def optimize(
 
     Optional AI advisor via MOUDO_AI_* env (BYOK); without it no network call is made.
     """
-    try:
-        baseline_snapshot = snapshot_from_json(baseline.read_text(encoding="utf-8"))
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        typer.secho(f"cannot load baseline snapshot: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=2) from exc
+    baseline_snapshot = _load_snapshot(baseline, "baseline snapshot")
     try:
         statements = split_statements(statements_file.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as exc:
@@ -318,15 +305,7 @@ def optimize(
     )
 
     if report_json is not None:
-        try:
-            report_json.write_text(
-                json.dumps(outcome.report_json, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-            )
-        except OSError as exc:
-            # 报告不可写属环境错误，退出码 2，避免 traceback 覆盖结论
-            typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
-        typer.echo(f"report -> {report_json}", err=True)
+        _write_json_report(report_json, outcome.report_json)
     typer.echo(outcome.render())
     if outcome.exit_code != 0:
         raise typer.Exit(code=outcome.exit_code)
@@ -387,15 +366,7 @@ def lint(
     if report_json is not None:
         from modou.lint import result_to_json
 
-        try:
-            report_json.write_text(
-                json.dumps(attach_ai_opinions(result_to_json(result), opinions), ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
-        typer.echo(f"report -> {report_json}", err=True)
+        _write_json_report(report_json, attach_ai_opinions(result_to_json(result), opinions))
     typer.echo(render_lint_text(result) + render_opinions_section(opinions))
     raise typer.Exit(code=result.exit_code)
 
@@ -412,25 +383,17 @@ def patrol_drift(
     after: Path | None = typer.Option(None, "--after", help="Current snapshot JSON (or use --dsn to capture live)."),
     dsn: str | None = typer.Option(None, "--dsn", help="Capture the current snapshot live from this DSN."),
     database: list[str] = typer.Option([], "--database", "-d", help="Databases to patrol (repeatable)."),
-    host: str | None = typer.Option(None, "--host"),
-    port: int | None = typer.Option(None, "--port", min=1, max=65535),
-    user: str | None = typer.Option(None, "--user"),
-    password: str | None = typer.Option(None, "--password", help="MySQL password (env: MOUDO_MYSQL_PASSWORD)."),
+    host: MysqlHostOption = None,
+    port: MysqlPortOption = None,
+    user: MysqlUserOption = None,
+    password: MysqlPasswordOption = None,
     report_json: Path | None = typer.Option(None, "--report-json"),
 ) -> None:
     """Two-way structural drift between a baseline snapshot and a current snapshot."""
-    try:
-        baseline_snapshot = snapshot_from_json(baseline.read_text(encoding="utf-8"))
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        typer.secho(f"cannot load baseline snapshot: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=2) from exc
+    baseline_snapshot = _load_snapshot(baseline, "baseline snapshot")
 
     if after is not None:
-        try:
-            current_snapshot = snapshot_from_json(after.read_text(encoding="utf-8"))
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            typer.secho(f"cannot load current snapshot: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
+        current_snapshot = _load_snapshot(after, "current snapshot")
     elif dsn is not None:
         if not database:
             typer.secho("--database is required with --dsn", fg=typer.colors.RED, err=True)
@@ -448,16 +411,11 @@ def patrol_drift(
         raise typer.Exit(code=2)
 
     from modou.patrol.drift import drift_between_snapshots
-    from modou.patrol.report import drift_render, drift_to_json, dumps
+    from modou.patrol.report import drift_render, drift_to_json
 
     report = drift_between_snapshots(baseline_snapshot.databases, current_snapshot.databases)
     if report_json is not None:
-        try:
-            report_json.write_text(dumps(drift_to_json(report)), encoding="utf-8")
-        except OSError as exc:
-            typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
-        typer.echo(f"report -> {report_json}", err=True)
+        _write_json_report(report_json, drift_to_json(report))
     typer.echo(drift_render(report))
     raise typer.Exit(code=report.exit_code)
 
@@ -470,14 +428,14 @@ def patrol_unused_indexes(
     observe_days: int = typer.Option(
         DEFAULT_OBSERVE_DAYS, "--observe-days", min=1, help="Observation window in days for confirmed-unused."
     ),
-    host: str | None = typer.Option(None, "--host"),
-    port: int | None = typer.Option(None, "--port", min=1, max=65535),
-    user: str | None = typer.Option(None, "--user"),
-    password: str | None = typer.Option(None, "--password", help="MySQL password (env: MOUDO_MYSQL_PASSWORD)."),
+    host: MysqlHostOption = None,
+    port: MysqlPortOption = None,
+    user: MysqlUserOption = None,
+    password: MysqlPasswordOption = None,
     report_json: Path | None = typer.Option(None, "--report-json"),
 ) -> None:
     """Layered unused-index detection (live) plus offline redundancy judgment (snapshot)."""
-    from modou.patrol.report import dumps, unused_render, unused_to_json
+    from modou.patrol.report import unused_render, unused_to_json
     from modou.patrol.unused_indexes import UnusedIndexesReport
 
     inventories, params, uptime = _patrol_inventories(dsn, database, snapshot, host, port, user, password)
@@ -486,17 +444,28 @@ def patrol_unused_indexes(
         observe_days=observe_days, uptime_seconds=uptime, usages=usages, redundancies=redundancies
     )
     if report_json is not None:
-        try:
-            report_json.write_text(dumps(unused_to_json(report)), encoding="utf-8")
-        except OSError as exc:
-            _cli_fail(f"cannot write report: {exc}", exc)
-        typer.echo(f"report -> {report_json}", err=True)
+        _write_json_report(report_json, unused_to_json(report))
     typer.echo(unused_render(report))
 
 
 def _cli_fail(message: str, cause: Exception | None = None) -> NoReturn:
     typer.secho(message, fg=typer.colors.RED, err=True)
     raise typer.Exit(code=2) from cause
+
+
+def _load_snapshot(path: Path, label: str) -> Snapshot:
+    try:
+        return snapshot_from_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        _cli_fail(f"cannot load {label}: {exc}", exc)
+
+
+def _write_json_report(path: Path, payload: dict[str, Any]) -> None:
+    try:
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        _cli_fail(f"cannot write report: {exc}", exc)
+    typer.echo(f"report -> {path}", err=True)
 
 
 def _patrol_inventories(
@@ -507,7 +476,7 @@ def _patrol_inventories(
     port: int | None,
     user: str | None,
     password: str | None,
-) -> tuple[list, MysqlParams | None, int | None]:
+) -> tuple[list[Any], MysqlParams | None, int | None]:
     from modou.patrol.unused_indexes import PerformanceSchemaDisabledError, collect_from_live
 
     if dsn is not None:
@@ -539,8 +508,8 @@ def _patrol_inventories(
 
 
 def _judge_inventories(
-    inventories: list, params: MysqlParams | None, uptime: int | None, observe_days: int
-) -> tuple[list, list]:
+    inventories: list[Any], params: MysqlParams | None, uptime: int | None, observe_days: int
+) -> tuple[list[Any], list[Any]]:
     from modou.patrol.unused_indexes import (
         IndexUsage,
         PerformanceSchemaDisabledError,
@@ -552,9 +521,9 @@ def _judge_inventories(
     usages: list[IndexUsage] = []
     redundancies = []
     for inventory in inventories:
-        if uptime is not None:
+        if uptime is not None and params is not None:
             try:
-                conn = params.connect()  # type: ignore[union-attr]
+                conn = params.connect()
                 try:
                     counts = read_index_io_counts(conn, inventory.name)
                 finally:
@@ -580,11 +549,11 @@ def patrol_summarize(
     """
     from modou.patrol.summary import SummaryInputError, summarize_render, summarize_reports
 
-    def _load(option: str, path: Path | None) -> dict | None:
+    def _load(option: str, path: Path | None) -> dict[str, Any] | None:
         if path is None:
             return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            return dict(json.loads(path.read_text(encoding="utf-8")))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             typer.secho(f"cannot load {option} report: {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=2) from exc
@@ -613,14 +582,7 @@ def patrol_summarize(
         opinions = narrativize(report, config=ai_config)
 
     if report_json is not None:
-        try:
-            report_json.write_text(
-                json.dumps(attach_ai_opinions(report, opinions), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-            )
-        except OSError as exc:
-            typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
-        typer.echo(f"report -> {report_json}", err=True)
+        _write_json_report(report_json, attach_ai_opinions(report, opinions))
     typer.echo(summarize_render(report) + render_opinions_section(opinions))
     raise typer.Exit(code=int(report["exit_code"]))
 
@@ -632,7 +594,7 @@ def patrol_slowlog(
     report_json: Path | None = typer.Option(None, "--report-json"),
 ) -> None:
     """Aggregate a MySQL slow query log by query fingerprint (pt-query-digest semantics)."""
-    from modou.patrol.report import dumps, slowlog_render, slowlog_to_json
+    from modou.patrol.report import slowlog_render, slowlog_to_json
     from modou.patrol.slowlog import analyze_slowlog
 
     try:
@@ -641,12 +603,7 @@ def patrol_slowlog(
         typer.secho(f"cannot read slowlog: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
     if report_json is not None:
-        try:
-            report_json.write_text(dumps(slowlog_to_json(report)), encoding="utf-8")
-        except OSError as exc:
-            typer.secho(f"cannot write report: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
-        typer.echo(f"report -> {report_json}", err=True)
+        _write_json_report(report_json, slowlog_to_json(report))
     typer.echo(slowlog_render(report))
 
 

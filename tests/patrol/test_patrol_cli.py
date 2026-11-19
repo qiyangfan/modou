@@ -173,7 +173,7 @@ class TestPatrolSummarizeCli:
         for key in ("MOUDO_AI_BASE_URL", "MOUDO_AI_API_KEY", "MOUDO_AI_MODEL"):
             monkeypatch.delenv(key, raising=False)
 
-        def must_not_call(*args, **kwargs):
+        def must_not_call(*args, **_):
             raise AssertionError("AI narrative must not run without BYOK config")
 
         monkeypatch.setattr("modou.ai.lane_patrol.narrativize", must_not_call)
@@ -193,7 +193,7 @@ class TestPatrolSummarizeCli:
         monkeypatch.setenv("MOUDO_AI_API_KEY", "k")
         monkeypatch.setenv("MOUDO_AI_MODEL", "glm-4.7")
 
-        def fake_narrative(summary, *, config, **kwargs):
+        def fake_narrative(summary, *, config, **_):
             assert config.model == "glm-4.7"
             return [AiOpinion(lane="patrol", subject="cross-signal", opinion="漂移与慢日志相互印证。", model="glm-4.7")]
 

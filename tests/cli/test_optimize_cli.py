@@ -53,7 +53,7 @@ class TestOptimizeCliErrors:
         """容器不可用是环境错误：退出码 2，报告 JSON 含 env_errors。"""
         from modou.replay.container import ContainerRuntimeError
 
-        def boom(*args, **kwargs):
+        def boom(*args, **_):
             raise ContainerRuntimeError("no container runtime found (tried: podman, docker)")
 
         monkeypatch.setattr("modou.optimize.pipeline.ShadowMySQL.start", staticmethod(boom))

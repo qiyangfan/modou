@@ -6,6 +6,7 @@ import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pymysql
 from pymysql.connections import Connection
@@ -17,6 +18,7 @@ from modou.replay.container import ContainerRuntimeError, ShadowMySQL
 from modou.replay.replay import ReplayError, replay_statements
 from modou.replay.splitter import split_statements
 from modou.report.render import EXIT_DIFF, EXIT_ERROR, EXIT_OK, VerifyReport, render_text, report_to_json
+from modou.snapshot.compat import unsupported_version_errors, version_series
 from modou.snapshot.introspect import read_database_inventory, read_meta
 from modou.snapshot.model import DatabaseInventory, Snapshot
 from modou.snapshot.restore import restore_snapshot
@@ -36,7 +38,7 @@ class VerifyInputError(Exception):
 @dataclass
 class VerifyOutcome:
     report: VerifyReport
-    report_json: dict
+    report_json: dict[str, Any]
 
     @property
     def exit_code(self) -> int:
@@ -62,14 +64,14 @@ def run_verify(
     """执行完整验收；默认销毁自建容器，注入的容器不接管生命周期。"""
     try:
         # 锁风险注记跟随基线大版本；5.7 无 INSTANT
-        target_major = "5.7" if replay_env.version_series(baseline.meta.server_version).startswith("5.") else "8.0"
+        target_major = "5.7" if version_series(baseline.meta.server_version).startswith("5.") else "8.0"
         pack = pack_changeset(changeset_dir, allow_legacy_names=allow_legacy_names, target_major=target_major)
     except ChangesetValidationError as exc:
         raise VerifyInputError(exc.errors) from exc
 
     # 采集/内省依赖 8.0+ 元数据（STATISTICS.expression、CHECK_CONSTRAINTS），
     # 入口处拒绝更老版本；5.7 只用于 pack 的锁风险注记
-    version_errors = replay_env.unsupported_version_errors(baseline.meta)
+    version_errors = unsupported_version_errors(baseline.meta)
     if version_errors:
         return _outcome(EXIT_ERROR, pack=pack, errors=version_errors)
 
@@ -106,7 +108,7 @@ def _start_shadow(
     container_cli: str | None,
     pack: PackResult,
 ) -> tuple[ShadowMySQL | None, VerifyOutcome | None]:
-    resolved_image = image or f"mysql:{replay_env.version_series(baseline.meta.server_version)}"
+    resolved_image = image or f"mysql:{version_series(baseline.meta.server_version)}"
     try:
         return ShadowMySQL.start(resolved_image, cli=container_cli), None
     except ContainerRuntimeError as exc:
@@ -234,7 +236,7 @@ def _outcome(
     *,
     errors: list[str] | None = None,
     pack: PackResult | None = None,
-    replay_error: dict | None = None,
+    replay_error: dict[str, Any] | None = None,
     databases: dict[str, list[ObjectConclusion]] | None = None,
 ) -> VerifyOutcome:
     report = VerifyReport(

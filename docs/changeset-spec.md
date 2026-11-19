@@ -8,7 +8,7 @@
 
 ## 目录结构
 
-```
+```text
 my-changeset/
 ├── manifest.txt
 ├── V01__create_orders.sql
@@ -25,7 +25,7 @@ my-changeset/
 manifest 是文件清单声明(迭代说明 + 文件序),`pack` 校验目录内容与清单一致,
 防漏文件与防多交付:
 
-```
+```text
 # 迭代 32:订单域 — 示例变更集(modou pack/verify 演示与冒烟用)
 V01__create_orders.sql
 V02__alter_orders_add_remark.sql
@@ -67,7 +67,7 @@ stdout,重定向交付不会混入非 SQL 文本。
 
 ## 交付与验收流程
 
-```
+```text
 开发侧                                运维侧
 ──────                                ──────
 my-changeset/ 目录
@@ -87,9 +87,9 @@ my-changeset/ 目录
 
 ## 退出码
 
-| 命令 | 0 | 1 | 2 |
-|---|---|---|---|
-| `pack` | 打包成功 | 拒绝交付(manifest 不符/边界漂移) | 环境或输入错误 |
-| `verify` | 全部一致 | 存在差异结论 | 环境或输入错误 |
+| 命令     | 0        | 1                                | 2              |
+| -------- | -------- | -------------------------------- | -------------- |
+| `pack`   | 打包成功 | 拒绝交付(manifest 不符/边界漂移) | 环境或输入错误 |
+| `verify` | 全部一致 | 存在差异结论                     | 环境或输入错误 |
 
 完整语义见 [formats.md](formats.md)「各命令退出码语义」。

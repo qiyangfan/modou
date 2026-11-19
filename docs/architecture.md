@@ -12,7 +12,7 @@
 
 ## 内核三件套（四车道共用）
 
-```
+```text
 introspect（内省）        replay（影子回放）            report（结构化报告）
 线上元数据快照采集   →    同版本容器 MySQL 灌入快照  →   统一格式（人读文本 + 机读 JSON）
 information_schema       回放变更集 = 期望态            确定性退出码（CI 卡点）
@@ -28,7 +28,7 @@ SHOW CREATE TABLE        建建议索引重跑 EXPLAIN         建议"实测提�
 AI 做规则表达不了的语义判断。AI 产物两级标注：**实证已验证**（可关联退出码）与
 **AI 观点**（报告单列，永不影响退出码）。
 
-```
+```text
 通道 A（默认，零密钥）  宿主 Agent 委托面：MCP 证据原语工具 + 随包 skills
                         AI 活在宿主（Claude Code / Cursor），modou 零模型零密钥
 通道 B（BYOK，未配置零网络）  内置受控多轮：确定性流水线预取证据 → 打包进提示词
@@ -41,7 +41,7 @@ AI 做规则表达不了的语义判断。AI 产物两级标注：**实证已验
 
 ## 模块地图（src/modou/）
 
-```
+```text
 cli.py            typer 入口：子命令注册，零业务逻辑
 changeset/        变更集发现、manifest 校验、排序、合并打包、破坏性预警     [v0.1]
 snapshot/         只读快照采集与灌入（含版本/字符集元信息）                 [v0.1]
@@ -59,19 +59,19 @@ ai/               AI 分析师层：上下文工程（切片/分包/模板/规�
 
 ## 四车道 × 三表面
 
-| 车道 | 命令域 | 共用的内核能力 | AI 分析师职责（ADR-0009） |
-|---|---|---|---|
-| 变更验收 | `pack` / `verify` | introspect + replay + report | 变更组语义评审 + 失败归因解释 |
-| SQL 优化 | `optimize` | introspect + replay（建索引实测）+ report | 候选生成（过影子库实证关） |
-| 规则审核 | `lint` | 纯静态（sqlglot），不依赖影子库 | 残留语句语义评审（长尾） |
-| 漂移洞察 | `patrol` | introspect + report（定时化） | 跨信号综合洞察叙事 |
+| 车道     | 命令域            | 共用的内核能力                            | AI 分析师职责（ADR-0009）     |
+| -------- | ----------------- | ----------------------------------------- | ----------------------------- |
+| 变更验收 | `pack` / `verify` | introspect + replay + report              | 变更组语义评审 + 失败归因解释 |
+| SQL 优化 | `optimize`        | introspect + replay（建索引实测）+ report | 候选生成（过影子库实证关）    |
+| 规则审核 | `lint`            | 纯静态（sqlglot），不依赖影子库           | 残留语句语义评审（长尾）      |
+| 漂移洞察 | `patrol`          | introspect + report（定时化）             | 跨信号综合洞察叙事            |
 
 表面：CLI 为体、MCP 为面（1:1 映射子命令 + 证据原语扩列）、本地 Web 为薄报告层
 （ADR-0002/0009）。
 
 ## 变更车道核心流程（v0.1 范围）
 
-```
+```text
 开发侧                                运维侧
 ──────                                ──────
 changeset/ 目录（V 命名 + manifest）

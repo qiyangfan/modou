@@ -1,6 +1,6 @@
 // ── 变更验收 ────────────────────────────────────────────────────────────────
 import type { ReportPayload, VerifyConclusion } from "../types";
-import { card, detailTable, el } from "./shared";
+import { card, detailCard, el } from "./shared";
 
 interface VerifyData {
   exit_code: number;
@@ -137,18 +137,10 @@ function conclusionCard(conclusion: VerifyConclusion): HTMLElement {
       : conclusion.kind === "wrong_execution"
         ? "error"
         : "changed";
-  return card(
-    el(
-      "span",
-      `badge ${badgeClass}`,
-      CONCLUSION_LABELS[conclusion.kind] ?? conclusion.kind,
-    ),
-    el(
-      "strong",
-      undefined,
-      `${conclusion.object_type} ${conclusion.object_name}`,
-    ),
-    el("div", "muted", `维度：${(conclusion.dimensions ?? []).join("、")}`),
-    detailTable(conclusion.details ?? []),
+  const badge = el(
+    "span",
+    `badge ${badgeClass}`,
+    CONCLUSION_LABELS[conclusion.kind] ?? conclusion.kind,
   );
+  return detailCard(badge, conclusion);
 }

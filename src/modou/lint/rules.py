@@ -36,28 +36,28 @@ _COMPARISON_NODES = (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE, exp.Like
 _ARITHMETIC_NODES = (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod)
 
 
-def _column_defs(tree: exp.Expression) -> list[exp.ColumnDef]:
+def _create_table_entries(tree: exp.Expr) -> list[exp.Expr]:
+    """返回 CREATE TABLE 的条目（列定义与约束）；非建表语句返回空。"""
+    if not isinstance(tree, exp.Create) or tree.kind != "TABLE":
+        return []
+    schema = tree.this
+    if not isinstance(schema, exp.Schema):
+        return []
+    return list(schema.expressions)
+
+
+def _column_defs(tree: exp.Expr) -> list[exp.ColumnDef]:
     """返回 CREATE TABLE 的列定义；非建表语句返回空。"""
-    if not isinstance(tree, exp.Create) or tree.kind != "TABLE":
-        return []
-    schema = tree.this
-    if not isinstance(schema, exp.Schema):
-        return []
-    return [e for e in schema.expressions if isinstance(e, exp.ColumnDef)]
+    return [e for e in _create_table_entries(tree) if isinstance(e, exp.ColumnDef)]
 
 
-def _table_constraints(tree: exp.Expression) -> list[exp.Expression]:
-    if not isinstance(tree, exp.Create) or tree.kind != "TABLE":
-        return []
-    schema = tree.this
-    if not isinstance(schema, exp.Schema):
-        return []
-    return [e for e in schema.expressions if not isinstance(e, exp.ColumnDef)]
+def _table_constraints(tree: exp.Expr) -> list[exp.Expr]:
+    return [e for e in _create_table_entries(tree) if not isinstance(e, exp.ColumnDef)]
 
 
-def _flattened_table_constraints(tree: exp.Expression) -> list[exp.Expression]:
+def _flattened_table_constraints(tree: exp.Expr) -> list[exp.Expr]:
     """展开具名 CONSTRAINT 内的主键和索引约束。"""
-    flattened: list[exp.Expression] = []
+    flattened: list[exp.Expr] = []
     for constraint in _table_constraints(tree):
         if isinstance(constraint, exp.Constraint):
             flattened.extend(constraint.args.get("expressions") or [])
@@ -73,15 +73,15 @@ def _dtype_name(coldef: exp.ColumnDef) -> str:
     return str(kind.this.name) if hasattr(kind.this, "name") else str(kind.this)
 
 
-def _constraint_kinds(coldef: exp.ColumnDef) -> list[exp.Expression]:
+def _constraint_kinds(coldef: exp.ColumnDef) -> list[exp.Expr]:
     return [c.args["kind"] for c in (coldef.constraints or []) if c.args.get("kind") is not None]
 
 
-def _has_constraint_of(coldef: exp.ColumnDef, constraint_type: type) -> bool:
+def _has_constraint_of(coldef: exp.ColumnDef, constraint_type: type | tuple[type, ...]) -> bool:
     return any(isinstance(k, constraint_type) for k in _constraint_kinds(coldef))
 
 
-def _index_column_name(index: exp.Expression) -> str:
+def _index_column_name(index: exp.Expr) -> str:
     """读取普通 KEY 或 UNIQUE KEY 的显式索引名。"""
     this = index.args.get("this")
     if isinstance(this, exp.Schema):
@@ -89,11 +89,11 @@ def _index_column_name(index: exp.Expression) -> str:
     return this.name if isinstance(this, exp.Identifier) else ""
 
 
-def _naming_pairs(tree: exp.Expression) -> list[tuple[str, str]]:
+def _naming_pairs(tree: exp.Expr) -> list[tuple[str, str]]:
     """返回表级 UNIQUE KEY 与普通 KEY 的命名检查项；FULLTEXT、SPATIAL 和列级 UNIQUE 不检查。"""
     pairs: list[tuple[str, str]] = []
 
-    def fulltext_or_spatial(node: exp.Expression) -> bool:
+    def fulltext_or_spatial(node: exp.Expr) -> bool:
         return str(node.args.get("kind") or "").upper() in ("FULLTEXT", "SPATIAL")
 
     for constraint in _table_constraints(tree):
@@ -111,18 +111,18 @@ def _naming_pairs(tree: exp.Expression) -> list[tuple[str, str]]:
     return pairs
 
 
-def _wrapped_predicate_columns(node: exp.Expression | None) -> list[exp.Column]:
+def _wrapped_predicate_columns(node: exp.Expr | None) -> list[exp.Column]:
     """返回比较表达式中被函数或运算包裹的列，去重并保持顺序；不跨子查询和集合操作。"""
     if node is None:
         return []
 
-    def prune_nested_query(n: exp.Expression) -> bool:
+    def prune_nested_query(n: exp.Expr) -> bool:
         return isinstance(n, (exp.Select, exp.Union, exp.Subquery)) and n is not node
 
     seen: set[int] = set()
     columns: list[exp.Column] = []
     for sub in node.walk(prune=prune_nested_query):
-        if not isinstance(sub, (*exp.Func.__subclasses__(), *_ARITHMETIC_NODES)):  # type: ignore[arg-type]
+        if not isinstance(sub, (*exp.Func.__subclasses__(), *_ARITHMETIC_NODES)):
             continue
         for col in sub.find_all(exp.Column):
             if id(col) not in seen:
@@ -131,7 +131,7 @@ def _wrapped_predicate_columns(node: exp.Expression | None) -> list[exp.Column]:
     return columns
 
 
-def _is_prefix_wildcard_like(like: exp.Expression) -> bool:
+def _is_prefix_wildcard_like(like: exp.Expr) -> bool:
     return (
         isinstance(like.this, exp.Column)
         and isinstance(like.expression, exp.Literal)
@@ -140,12 +140,12 @@ def _is_prefix_wildcard_like(like: exp.Expression) -> bool:
     )
 
 
-def _pk_column_name(pk_part: exp.Expression) -> str:
+def _pk_column_name(pk_part: exp.Expr) -> str:
     """取主键列名；sqlglot 各版本可能给出 Column 或 Identifier。"""
     return pk_part.name if hasattr(pk_part, "name") else ""
 
 
-def _has_pk_or_unique(tree: exp.Expression) -> bool:
+def _has_pk_or_unique(tree: exp.Expr) -> bool:
     """判断建表语句是否声明主键或唯一键（含列级、表级和具名约束）。"""
     for coldef in _column_defs(tree):
         if _has_constraint_of(coldef, (exp.PrimaryKeyColumnConstraint, exp.UniqueColumnConstraint)):
@@ -153,7 +153,7 @@ def _has_pk_or_unique(tree: exp.Expression) -> bool:
     return any(isinstance(c, (exp.PrimaryKey, exp.UniqueColumnConstraint)) for c in _flattened_table_constraints(tree))
 
 
-def _pk_column_defs(tree: exp.Expression) -> list[exp.ColumnDef]:
+def _pk_column_defs(tree: exp.Expr) -> list[exp.ColumnDef]:
     """返回主键列定义，合并列级与表级/具名 CONSTRAINT 声明。"""
     by_name = {coldef.name: coldef for coldef in _column_defs(tree)}
     names = [coldef.name for coldef in _column_defs(tree) if _has_constraint_of(coldef, exp.PrimaryKeyColumnConstraint)]
@@ -172,7 +172,7 @@ def _pk_column_defs(tree: exp.Expression) -> list[exp.ColumnDef]:
     return coldefs
 
 
-def _secondary_index_count(tree: exp.Expression) -> int:
+def _secondary_index_count(tree: exp.Expr) -> int:
     """统计二级索引数；列级 UNIQUE 计入，主键不计。"""
     count = sum(
         1
@@ -272,7 +272,7 @@ RULES: list[Rule] = [
         "大 OFFSET 分页",
         "深翻页扫描并丢弃 offset 行；建议书签（keyset）分页",
         lambda tree, th: (
-            [_offset_message(tree, th)] if _offset_value(tree) is not None and _offset_value(tree) > th.offset else []
+            [_offset_message(tree, th)] if (offset := _offset_value(tree)) is not None and offset > th.offset else []
         ),
     ),
     Rule(
@@ -489,11 +489,11 @@ RULES: list[Rule] = [
 ]
 
 
-def _iter_in(tree: exp.Expression) -> Iterator[exp.In]:
+def _iter_in(tree: exp.Expr) -> Iterator[exp.In]:
     return tree.find_all(exp.In)
 
 
-def _offset_value(tree: exp.Expression) -> int | None:
+def _offset_value(tree: exp.Expr) -> int | None:
     if not isinstance(tree, exp.Select):
         return None
     offset = tree.args.get("offset")
@@ -507,11 +507,11 @@ def _offset_value(tree: exp.Expression) -> int | None:
         return None
 
 
-def _offset_message(tree: exp.Expression, th: Thresholds) -> str:
+def _offset_message(tree: exp.Expr, th: Thresholds) -> str:
     return f"OFFSET {_offset_value(tree)} 超过阈值 {th.offset}，深翻页将扫描并丢弃大量行"
 
 
-def _missing_comment_message(tree: exp.Expression) -> list[str]:
+def _missing_comment_message(tree: exp.Expr) -> list[str]:
     missing = [
         coldef.name for coldef in _column_defs(tree) if not _has_constraint_of(coldef, exp.CommentColumnConstraint)
     ]

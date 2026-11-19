@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from typing import cast
 
 import pymysql.err
 
@@ -36,7 +37,7 @@ class _StubConn:
 def test_non_int_first_arg_yields_code_zero() -> None:
     """客户端侧错误可能只有 message 一个参数，code 应归 0。"""
     conn = _StubConn(_StubCursor([pymysql.err.InternalError("just a message")]))
-    result = replay_statements(conn, ["SELECT 1"])  # type: ignore[arg-type]
+    result = replay_statements(cast(pymysql.connections.Connection, conn), ["SELECT 1"])
     assert result.executed_count == 0
     assert result.error is not None
     assert result.error.error_code == 0
@@ -45,7 +46,7 @@ def test_non_int_first_arg_yields_code_zero() -> None:
 
 def test_standard_two_arg_error_keeps_code_and_message() -> None:
     conn = _StubConn(_StubCursor([None, pymysql.err.OperationalError(1064, "syntax error")]))
-    result = replay_statements(conn, ["SELECT 1", "SELECT 2"])  # type: ignore[arg-type]
+    result = replay_statements(cast(pymysql.connections.Connection, conn), ["SELECT 1", "SELECT 2"])
     assert result.executed_count == 1
     assert result.error is not None
     assert result.error.statement_index == 2

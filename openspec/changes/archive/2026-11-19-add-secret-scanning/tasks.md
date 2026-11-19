@@ -24,7 +24,7 @@
 - [x] 3.2 植入违规必须非 0：`leak-probe.txt` 写入高熵假 AWS 键
       （形如 `AKIA…`，非 gitleaks allowlist 的 EXAMPLE 样例）+ 假 secret，
       `detect --source . --no-git
-      --redact --verbose --exit-code 1` 报 2 处（`aws-access-token` /
+--redact --verbose --exit-code 1` 报 2 处（`aws-access-token` /
       `generic-api-key`），EXIT=1
 - [x] 3.3 移除后恢复：删除 `leak-probe.txt` 重跑，零命中 EXIT=0
 - [x] 3.4 CI 原命令等价验证：临时克隆仓库并提交同一假键，按 CI 原命令

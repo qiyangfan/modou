@@ -1,6 +1,7 @@
 # db-patrol Specification
 
 ## Purpose
+
 数据库结构巡检：两份快照的两方漂移、基于 performance_schema 的未用/冗余
 索引分层判定、慢日志的指纹聚合；全部结论附数值与口径注记，建议性输出不改退出码语义。 add-patrol-lane. Update Purpose after archive.
 

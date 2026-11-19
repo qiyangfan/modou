@@ -19,7 +19,7 @@ class TestResidualStatements:
         assert len(residual) == 1  # 只有第二条（COL.001 命中的首条不在残留面）
         assert "id = 1" in residual[0][1]
 
-    def test_unparseable_statement_is_never_residual(self) -> None:
+    def test_unparsable_statement_is_never_residual(self) -> None:
         text = "SELECT 'unclosed\n"
         assert residual_statements(text, RULES) == []
 

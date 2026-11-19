@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from modou.ai.client import (
     DEFAULT_TIMEOUT_SECONDS,
     AiCallError,
@@ -29,7 +31,7 @@ _SYSTEM_PROMPT = (
 
 
 def narrativize(
-    summary_json: dict,
+    summary_json: dict[str, Any],
     *,
     config: AiConfig,
     transport: Transport = default_transport,
@@ -53,7 +55,7 @@ def narrativize(
     items = extract_json_array(content)
     if items is None:
         # 回复不可解析时按调用失败降级。
-        return [degraded(LANE, SUBJECT, config.model, "unparseable reply (no JSON array)")]
+        return [degraded(LANE, SUBJECT, config.model, "unparsable reply (no JSON array)")]
     opinions: list[AiOpinion] = []
     for item in items:
         if not isinstance(item, dict):

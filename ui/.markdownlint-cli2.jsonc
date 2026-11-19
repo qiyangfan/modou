@@ -1,0 +1,20 @@
+{
+  "globs": [
+    "../README.md",
+    "../README.en.md",
+    "../AGENTS.md",
+    "../docs/**/*.md",
+    "../openspec/**/*.md",
+  ],
+  "config": {
+    // 中文文档无空格分词，行宽放宽到 120；表格与代码块不参与行宽判断。
+    "MD013": {
+      "line_length": 120,
+      "tables": false,
+      "code_blocks": false,
+      "headings": false,
+    },
+    // openspec delta 文件按规范以 "## ADDED Requirements" 开头，不是 H1。
+    "MD041": false,
+  },
+}

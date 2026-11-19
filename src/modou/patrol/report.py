@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict
+from typing import Any
 
 from modou.patrol.drift import CATEGORY_LABELS, DriftReport
 from modou.patrol.slowlog import SlowlogReport
 from modou.patrol.unused_indexes import STATUS_LABELS, UnusedIndexesReport
+from modou.report.jsonutil import one_line
 
 REPORT_VERSION = 1
 
 
-def drift_to_json(report: DriftReport) -> dict:
+def drift_to_json(report: DriftReport) -> dict[str, Any]:
     return {
         "report_kind": "patrol_drift",
         "report_version": REPORT_VERSION,
@@ -51,8 +52,8 @@ def drift_render(report: DriftReport) -> str:
                 f"  [{CATEGORY_LABELS[c.category]}] {c.object_type} `{c.object_name}`（{'、'.join(c.dimensions)}）"
             )
             for d in c.details:
-                lines.append(f"      {d.path}: 基线 {_one_line(d.expected)}")
-                lines.append(f"      {d.path}: 当前 {_one_line(d.actual)}")
+                lines.append(f"      {d.path}: 基线 {one_line(d.expected)}")
+                lines.append(f"      {d.path}: 当前 {one_line(d.actual)}")
     lines.append("")
     lines.append(
         f"汇总：新增 {report.count('added')} · 缺失 {report.count('removed')} · 定义变更 {report.count('changed')}"
@@ -61,7 +62,7 @@ def drift_render(report: DriftReport) -> str:
     return "\n".join(lines)
 
 
-def unused_to_json(report: UnusedIndexesReport) -> dict:
+def unused_to_json(report: UnusedIndexesReport) -> dict[str, Any]:
     return {
         "report_kind": "patrol_unused_indexes",
         "report_version": REPORT_VERSION,
@@ -115,7 +116,7 @@ def unused_render(report: UnusedIndexesReport) -> str:
     return "\n".join(lines)
 
 
-def slowlog_to_json(report: SlowlogReport) -> dict:
+def slowlog_to_json(report: SlowlogReport) -> dict[str, Any]:
     return {
         "report_kind": "patrol_slowlog",
         "report_version": REPORT_VERSION,
@@ -139,17 +140,8 @@ def slowlog_render(report: SlowlogReport) -> str:
             f"{position}. 次数 {agg.count} · 累计 {agg.query_time_total:.3f}s · 最大 {agg.query_time_max:.3f}s"
             f" · 扫描 {agg.rows_examined_total} 行"
         )
-        lines.append(f"   指纹：{_one_line(agg.fingerprint, 120)}")
-        lines.append(f"   样本：{_one_line(agg.sample)}")
+        lines.append(f"   指纹：{one_line(agg.fingerprint, 120)}")
+        lines.append(f"   样本：{one_line(agg.sample)}")
     lines.append("")
     lines.append("退出码：0（建议性输出不构成验收结论；2=环境或输入错误）")
     return "\n".join(lines)
-
-
-def dumps(payload: dict) -> str:
-    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
-
-
-def _one_line(text: str, limit: int = 160) -> str:
-    collapsed = " ".join(text.split())
-    return collapsed if len(collapsed) <= limit else collapsed[: limit - 3] + "..."

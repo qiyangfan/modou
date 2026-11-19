@@ -98,7 +98,7 @@ def test_pack_alter_annotations_by_version(tmp_path: Path) -> None:
     assert any("INPLACE" in m for m in msgs_57)
 
 
-def test_pack_unparseable_statement_warns_but_succeeds(tmp_path: Path) -> None:
+def test_pack_unparsable_statement_warns_but_succeeds(tmp_path: Path) -> None:
     write_changeset(tmp_path, {"V01__weird.sql": "CREATE TABLE ("}, ["V01__weird.sql"])
     result = pack_changeset(tmp_path)
     assert any(w.kind == "unparseable" for w in result.warnings)

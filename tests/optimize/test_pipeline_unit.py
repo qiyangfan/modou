@@ -31,7 +31,7 @@ class TestValidateInputs:
         with pytest.raises(OptimizeInputError, match="statement #1"):
             validate_inputs(["CREATE TABLE t (id int)"], make_snapshot(with_sample=True))
 
-    def test_unparseable_statement_rejected(self) -> None:
+    def test_unparsable_statement_rejected(self) -> None:
         with pytest.raises(OptimizeInputError, match="statement #1"):
             validate_inputs(["SELEC * FORM orders"], make_snapshot(with_sample=True))
 
@@ -221,11 +221,11 @@ class TestAdvisorExplainFactsWiring:
 
         captured: dict = {}
 
-        def fake_fetch(config, sql, schema_summary, *, explain_facts=None, **kwargs):
+        def fake_fetch(config, sql, schema_summary, *, explain_facts=None, **_):
             captured["explain_facts"] = explain_facts
             return []
 
-        monkeypatch.setattr(pipeline_module, "maybe_fetch_candidates", fake_fetch)
+        monkeypatch.setattr(pipeline_module, "fetch_candidates", fake_fetch)
         monkeypatch.setattr(
             pipeline_module,
             "explain_json",

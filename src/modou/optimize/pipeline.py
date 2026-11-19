@@ -6,13 +6,15 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 import pymysql
 import pymysql.connections
 
-from modou.optimize.advisor import AdvisorConfig, build_schema_summary, maybe_fetch_candidates
+from modou.optimize.advisor import AdvisorConfig, build_schema_summary, fetch_candidates
 from modou.optimize.candidates import (
     MAX_CANDIDATES_PER_STATEMENT,
     IndexCandidate,
@@ -32,6 +34,7 @@ from modou.optimize.report import EXIT_ERROR, EXIT_OK, STATUS_MEASURED, STATUS_U
 from modou.optimize.sideeffects import DEFAULT_INDEX_COUNT_LIMIT, check_candidate_side_effects
 from modou.replay import env as replay_env
 from modou.replay.container import ContainerRuntimeError, ShadowMySQL
+from modou.snapshot.compat import unsupported_version_errors, version_series
 from modou.snapshot.introspect import read_meta
 from modou.snapshot.model import Snapshot, TableDef
 from modou.snapshot.restore import restore_snapshot
@@ -53,7 +56,7 @@ class OptimizeInputError(Exception):
 
 @dataclass
 class OptimizeOutcome:
-    report: dict
+    report: dict[str, Any]
 
     @property
     def exit_code(self) -> int:
@@ -63,7 +66,7 @@ class OptimizeOutcome:
         return render_text(self.report)
 
     @property
-    def report_json(self) -> dict:
+    def report_json(self) -> dict[str, Any]:
         return report_to_json(self.report)
 
 
@@ -84,7 +87,7 @@ def validate_inputs(
     errors: list[str] = []
     if not statements:
         raise OptimizeInputError(["no statements to optimize"])
-    errors.extend(replay_env.unsupported_version_errors(baseline.meta))
+    errors.extend(unsupported_version_errors(baseline.meta))
     errors.extend(_sample_errors(baseline))
 
     analyses: list[StatementAnalysis] = []
@@ -137,9 +140,9 @@ def _analyze_one(
 def resolve_candidates(
     candidates: list[IndexCandidate],
     tables_map: dict[str, dict[str, TableDef]],
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[dict[str, Any]], list[str]]:
     """校验候选引用的表与列，生成建议及丢弃原因，并把索引候选转为 DDL。"""
-    suggestions: list[dict] = []
+    suggestions: list[dict[str, Any]] = []
     dropped: list[str] = []
     seen: set[tuple[str | None, str, tuple[str, ...]]] = set()
     for candidate in candidates:
@@ -211,18 +214,22 @@ def run_optimize(
     tables_map = {db: baseline.databases[db].tables for db in involved_dbs if db in baseline.databases}
 
     if shadow is not None:
-        return _optimize_on_shadow(
-            shadow, baseline, analyses, involved_dbs, tables_map, advisor_config, index_count_limit
+        return _guard_shadow_call(
+            lambda: _optimize_on_shadow(
+                shadow, baseline, analyses, involved_dbs, tables_map, advisor_config, index_count_limit
+            )
         )
 
-    resolved_image = image or f"mysql:{replay_env.version_series(baseline.meta.server_version)}"
+    resolved_image = image or f"mysql:{version_series(baseline.meta.server_version)}"
     try:
         started = ShadowMySQL.start(resolved_image, cli=container_cli)
     except ContainerRuntimeError as exc:
         return _error_outcome([f"shadow container failed: {exc}"])
     try:
-        return _optimize_on_shadow(
-            started, baseline, analyses, involved_dbs, tables_map, advisor_config, index_count_limit
+        return _guard_shadow_call(
+            lambda: _optimize_on_shadow(
+                started, baseline, analyses, involved_dbs, tables_map, advisor_config, index_count_limit
+            )
         )
     finally:
         if not keep_container:
@@ -230,25 +237,15 @@ def run_optimize(
                 started.close()
 
 
-def _optimize_on_shadow(
-    shadow: ShadowMySQL,
-    baseline: Snapshot,
-    analyses: list[StatementAnalysis],
-    involved_dbs: list[str],
-    tables_map: dict[str, dict[str, TableDef]],
-    advisor_config: AdvisorConfig | None,
-    index_count_limit: int,
-) -> OptimizeOutcome:
+def _guard_shadow_call(call: Callable[[], OptimizeOutcome]) -> OptimizeOutcome:
     try:
-        return _optimize_on_shadow_inner(
-            shadow, baseline, analyses, involved_dbs, tables_map, advisor_config, index_count_limit
-        )
+        return call()
     except (pymysql.err.MySQLError, OSError, RuntimeError, ValueError) as exc:
         # 影子阶段运行异常收敛为退出码 2；编程错误不捕获
         return _error_outcome([f"shadow operation failed: {exc}"])
 
 
-def _optimize_on_shadow_inner(
+def _optimize_on_shadow(
     shadow: ShadowMySQL,
     baseline: Snapshot,
     analyses: list[StatementAnalysis],
@@ -268,7 +265,7 @@ def _optimize_on_shadow_inner(
         refresh_statistics(conn, _sampled_tables(baseline, involved_dbs))
 
         schema_summary = build_schema_summary(baseline, set(involved_dbs))
-        databases_report: dict[str, dict] = {}
+        databases_report: dict[str, dict[str, Any]] = {}
         advisor_dropped: list[str] = []
         for position, analysis in enumerate(analyses, start=1):
             db_name = analysis.database or involved_dbs[0]
@@ -311,18 +308,18 @@ def _measure_statement(
     position: int,
     analysis: StatementAnalysis,
     tables_map: dict[str, dict[str, TableDef]],
-    schema_summary: list[dict],
+    schema_summary: list[dict[str, Any]],
     advisor_config: AdvisorConfig | None,
     index_count_limit: int,
     advisor_dropped: list[str],
-) -> dict:
+) -> dict[str, Any]:
     """测量单条语句：基线计划、规则与 AI 候选、逐候选实证、两级状态。"""
     sql = analysis.sql
     baseline_plan = explain_json(conn, sql)
     actual_before = _reference_actual_ms(conn, analysis)
 
     # AI 候选与规则候选一样，都需通过影子库实证。
-    ai_candidates = maybe_fetch_candidates(
+    ai_candidates = fetch_candidates(
         advisor_config,
         sql,
         schema_summary,
@@ -379,15 +376,15 @@ def _measure_statement(
 def _measure_suggestion(
     conn: pymysql.connections.Connection,
     analysis: StatementAnalysis,
-    suggestion: dict,
+    suggestion: dict[str, Any],
     tables_map: dict[str, dict[str, TableDef]],
     index_count_limit: int,
     actual_before: float | None,
     baseline_cost: float | None,
-    baseline_rows: list[dict],
-) -> dict:
+    baseline_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
     """测量单个候选：副作用检查、实证或跳过、状态判定。"""
-    result: dict = {
+    result: dict[str, Any] = {
         "source": suggestion["source"],
         "kind": suggestion["kind"],
         "content": suggestion["content"],
@@ -421,10 +418,10 @@ def _measure_suggestion(
 def _evidence_index_candidate(
     conn: pymysql.connections.Connection,
     analysis: StatementAnalysis,
-    suggestion: dict,
-    result: dict,
+    suggestion: dict[str, Any],
+    result: dict[str, Any],
     actual_before: float | None,
-) -> dict:
+) -> dict[str, Any]:
     """实证索引候选：建索引、刷新统计、复测，再删除并刷新统计。"""
     db_name = suggestion["database"]
     table_name = suggestion["table"]
@@ -479,9 +476,9 @@ def _evidence_index_candidate(
 
 def _evidence_rewrite_candidate(
     conn: pymysql.connections.Connection,
-    suggestion: dict,
-    result: dict,
-) -> dict:
+    suggestion: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
     """只用 EXPLAIN 评估改写语句，与基线代价对比；不执行改写。"""
     try:
         after_plan = explain_json(conn, suggestion["content"])
@@ -520,9 +517,9 @@ def _sampled_tables(baseline: Snapshot, dbs: list[str]) -> list[tuple[str, str]]
     ]
 
 
-def _evidence_tables(baseline: Snapshot, dbs: list[str]) -> list[dict]:
+def _evidence_tables(baseline: Snapshot, dbs: list[str]) -> list[dict[str, Any]]:
     """列出涉及库的全部表；未采样表的 sampled_rows 为 None。"""
-    tables: list[dict] = []
+    tables: list[dict[str, Any]] = []
     for db in dbs:
         if db not in baseline.databases:
             continue

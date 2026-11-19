@@ -7,6 +7,7 @@ build/
 
 # UI 依赖和构建产物不入库；打包前需生成 ui/dist。
 ui/node_modules/
+ui/coverage/
 
 # 虚拟环境与锁产物
 .venv/
@@ -14,6 +15,10 @@ ui/node_modules/
 # 测试与工具缓存
 .pytest_cache/
 .ruff_cache/
+
+# 覆盖率产物
+.coverage
+htmlcov/
 
 # IDE
 .idea/

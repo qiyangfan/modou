@@ -10,7 +10,7 @@ import {
   CATEGORY_LABELS,
   STATUS_LABELS,
   card,
-  detailTable,
+  detailCard,
   el,
 } from "./shared";
 
@@ -52,20 +52,12 @@ export function renderPatrolDrift(
 }
 
 function driftCard(conclusion: PatrolDriftConclusion): HTMLElement {
-  return card(
-    el(
-      "span",
-      `badge ${conclusion.category}`,
-      CATEGORY_LABELS[conclusion.category] ?? conclusion.category,
-    ),
-    el(
-      "strong",
-      undefined,
-      `${conclusion.object_type} ${conclusion.object_name}`,
-    ),
-    el("div", "muted", `维度：${(conclusion.dimensions ?? []).join("、")}`),
-    detailTable(conclusion.details ?? []),
+  const badge = el(
+    "span",
+    `badge ${conclusion.category}`,
+    CATEGORY_LABELS[conclusion.category] ?? conclusion.category,
   );
+  return detailCard(badge, conclusion);
 }
 
 export function renderPatrolUnused(

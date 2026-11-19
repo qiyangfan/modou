@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import sqlglot
 import sqlglot.errors
@@ -51,7 +52,7 @@ class Rule:
     level: str
     description: str
     suggestion: str
-    check: Callable[[exp.Expression, Thresholds], list[str]]
+    check: Callable[[exp.Expr, Thresholds], list[str]]
 
 
 @dataclass
@@ -269,7 +270,7 @@ def render_text(result: LintResult) -> str:
     return "\n".join(lines)
 
 
-def result_to_json(result: LintResult) -> dict:
+def result_to_json(result: LintResult) -> dict[str, Any]:
     return {
         "report_kind": "lint",
         "report_version": 1,

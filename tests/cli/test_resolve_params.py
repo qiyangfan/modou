@@ -50,6 +50,6 @@ def test_flag_beats_env_and_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_missing_password_prompts(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MOUDO_MYSQL_PASSWORD", raising=False)
-    monkeypatch.setattr(typer, "prompt", lambda *args, **kwargs: "prompted")
+    monkeypatch.setattr(typer, "prompt", lambda *args, **_: "prompted")
     params = _resolve_params(None, "h", None, None, None)
     assert params.password == "prompted"

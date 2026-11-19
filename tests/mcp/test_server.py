@@ -185,7 +185,7 @@ class TestEvidenceAlignment:
             meta=SnapshotMeta("8.4.11", "MySQL", "utf8mb4", "utf8mb4_0900_ai_ci", 0, ""),
             databases={"shop": DatabaseInventory(name="shop", charset="utf8mb4", collation="")},
         )
-        monkeypatch.setattr("modou.server.capture_to_file", lambda *args, **kwargs: captured)
+        monkeypatch.setattr("modou.server.capture_to_file", lambda *args, **_: captured)
         result = call(
             _server(),
             "snapshot_capture",
@@ -224,7 +224,7 @@ class TestEvidenceAlignment:
         monkeypatch.setenv("MOUDO_AI_MODEL", "glm-4.7")
         opinion = AiOpinion(lane="lint", subject="a.sql:1", opinion="顺序依赖风险。", model="glm-4.7")
 
-        def fake_review(*args, **kwargs):
+        def fake_review(*args, **_):
             return [opinion]
 
         monkeypatch.setattr("modou.ai.lane_lint.review_residual", fake_review)
@@ -242,7 +242,7 @@ class TestEvidenceAlignment:
         monkeypatch.setenv("MOUDO_AI_API_KEY", "k")
         monkeypatch.setenv("MOUDO_AI_MODEL", "glm-4.7")
 
-        def fake_attribute(*args, **kwargs):
+        def fake_attribute(*args, **_):
             return [AiOpinion(lane="verify", subject="report", opinion="归因解释。", model="glm-4.7")]
 
         monkeypatch.setattr("modou.ai.lane_verify.attribute_findings", fake_attribute)
@@ -255,7 +255,7 @@ class TestEvidenceAlignment:
             exit_code = 1
             report_json: ClassVar[dict] = {"report_version": 1, "exit_code": 1, "databases": {"shop": []}}
 
-        monkeypatch.setattr("modou.server.run_verify", lambda *args, **kwargs: FakeOutcome())
+        monkeypatch.setattr("modou.server.run_verify", lambda *args, **_: FakeOutcome())
         from modou.snapshot.model import DatabaseInventory, Snapshot, SnapshotMeta, snapshot_to_json
 
         baseline = tmp_path / "b.json"

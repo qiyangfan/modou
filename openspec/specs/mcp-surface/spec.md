@@ -1,6 +1,7 @@
 # mcp-surface Specification
 
 ## Purpose
+
 墨斗能力的 MCP 工具表面：与 CLI 分析类子命令一一映射（名称、描述、
 参数语义、退出码字段同源），仅本地 stdio，无端口监听、无鉴权；agent 经工具获得
 与 CLI 相同的报告与结论档位。 add-mcp-surface-ci. Update Purpose after archive.

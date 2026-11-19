@@ -138,7 +138,7 @@ class TestAttributeFindings:
     def test_fact_packaging_failure_degrades_not_crashes(self, tmp_path, monkeypatch) -> None:
         """事实打包（含 schema 切片）失败时降级为 report 级观点，不使命令崩溃。"""
 
-        def explode(*args, **kwargs):
+        def explode(*args, **_):
             raise RuntimeError("schema slice blew up")
 
         monkeypatch.setattr("modou.ai.lane_verify.slice_schema", explode)

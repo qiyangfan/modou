@@ -180,7 +180,7 @@ def test_capture_report_json_is_kernel_summary(tmp_path: Path, monkeypatch) -> N
         meta=SnapshotMeta("8.4.11", "MySQL", "utf8mb4", "utf8mb4_0900_ai_ci", 0, ""),
         databases={"shop": DatabaseInventory(name="shop", charset="utf8mb4", collation="")},
     )
-    monkeypatch.setattr("modou.cli.capture_to_file", lambda *args, **kwargs: captured)
+    monkeypatch.setattr("modou.cli.capture_to_file", lambda *args, **_: captured)
     output = tmp_path / "s.json"
     report = tmp_path / "summary.json"
     result = runner.invoke(
@@ -199,7 +199,7 @@ class TestVerifyAiAttribution:
         for key in ("MOUDO_AI_BASE_URL", "MOUDO_AI_API_KEY", "MOUDO_AI_MODEL"):
             monkeypatch.delenv(key, raising=False)
 
-        def must_not_call(*args, **kwargs):
+        def must_not_call(*args, **_):
             raise AssertionError("AI attribution must not run without BYOK config")
 
         monkeypatch.setattr("modou.ai.lane_verify.attribute_findings", must_not_call)
@@ -219,7 +219,7 @@ class TestVerifyAiAttribution:
                 return "墨斗验收报告"
 
         # 桩掉容器回放，让 AI 分支可达；未配置时 tripwire 不得触发
-        monkeypatch.setattr("modou.cli.run_verify", lambda *args, **kwargs: FakeOutcome())
+        monkeypatch.setattr("modou.cli.run_verify", lambda *args, **_: FakeOutcome())
         # AI 归因先于报告落盘；报告文件缺失即说明命令中途退出
         report = tmp_path / "verify-report.json"
         result = runner.invoke(
@@ -252,7 +252,7 @@ class TestVerifyAiAttribution:
         monkeypatch.setenv("MOUDO_AI_MODEL", "glm-4.7")
         captured: dict = {}
 
-        def fake_attribute(report_json, changeset_dir, baseline, *, config, **kwargs):
+        def fake_attribute(report_json, changeset_dir, baseline, *, config, **_):
             captured["exit_code"] = report_json["exit_code"]
             captured["model"] = config.model
             return [AiOpinion(lane="verify", subject="report", opinion="漏执行疑似运维侧跳过 V03。", model="glm-4.7")]
@@ -271,7 +271,7 @@ class TestVerifyAiAttribution:
             def render(self):
                 return "墨斗验收报告"
 
-        monkeypatch.setattr("modou.cli.run_verify", lambda *args, **kwargs: FakeOutcome())
+        monkeypatch.setattr("modou.cli.run_verify", lambda *args, **_: FakeOutcome())
         changeset = make_changeset(tmp_path / "cs", {"V01__a.sql": "SELECT 1;"}, ["V01__a.sql"])
         baseline = tmp_path / "b.json"
         baseline.write_text(_valid_snapshot_json(), encoding="utf-8")

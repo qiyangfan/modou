@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from modou.snapshot.model import Snapshot
 
 
-def snapshot_summary(snapshot: Snapshot) -> dict:
+def snapshot_summary(snapshot: Snapshot) -> dict[str, Any]:
     return {
         "server_version": snapshot.meta.server_version,
         "databases": {

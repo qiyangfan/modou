@@ -21,7 +21,7 @@ const opinions = [
     source: "ai",
     model: "qwen-plus",
     status: "degraded",
-    degraded_reason: "unparseable reply (no JSON array)",
+    degraded_reason: "unparsable reply (no JSON array)",
   },
 ];
 
@@ -46,7 +46,7 @@ describe("ai opinions section", () => {
     expect(text).toContain("qwen-plus");
     expect(text).toContain("疑似漏执行");
     expect(text).toContain("降级");
-    expect(text).toContain("unparseable reply (no JSON array)");
+    expect(text).toContain("unparsable reply (no JSON array)");
   });
 
   it("renders no opinions section when field missing or empty", () => {

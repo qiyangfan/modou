@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from modou.changeset.pack import StatementWarning
 from modou.diff.threeway import KIND_DRIFT, KIND_MISSING, KIND_WRONG, ObjectConclusion
@@ -38,7 +39,7 @@ class VerifyReport:
     generated_at: str
     exit_code: int
     env_errors: list[str] = field(default_factory=list)
-    replay_error: dict | None = None
+    replay_error: dict[str, Any] | None = None
     pack_warnings: list[StatementWarning] = field(default_factory=list)
     databases: dict[str, list[ObjectConclusion]] = field(default_factory=dict)
 
@@ -46,7 +47,7 @@ class VerifyReport:
         return sum(1 for conclusions in self.databases.values() for c in conclusions if c.kind == kind)
 
 
-def report_to_json(report: VerifyReport) -> dict:
+def report_to_json(report: VerifyReport) -> dict[str, Any]:
     return {
         "report_version": REPORT_VERSION,
         "generated_at": report.generated_at,
@@ -121,7 +122,7 @@ def render_text(report: VerifyReport) -> str:
     return "\n".join(lines)
 
 
-def _append_replay_error(err: dict, lines: list[str]) -> None:
+def _append_replay_error(err: dict[str, Any], lines: list[str]) -> None:
     lines.append(f"回放失败：语句 #{err['statement_index']}（error {err['error_code']}）：{err['error_message']}")
     lines.append(f"失败语句：{_one_line(err['sql'])}")
 

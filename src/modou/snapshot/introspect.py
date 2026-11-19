@@ -9,7 +9,7 @@ import pymysql.connections
 import pymysql.cursors
 
 from modou.db import MysqlParams, quote_ident
-from modou.replay.env import unsupported_version_errors
+from modou.snapshot.compat import unsupported_version_errors
 from modou.snapshot.model import (
     FORMAT_VERSION,
     CheckDef,
@@ -39,7 +39,10 @@ def read_meta(conn: pymysql.connections.Connection) -> SnapshotMeta:
             "SELECT VERSION(), @@version_comment, @@character_set_server, "
             "@@collation_server, @@lower_case_table_names, @@sql_mode"
         )
-        version, version_comment, charset, collation, lctn, sql_mode = cursor.fetchone()
+        row = cursor.fetchone()
+    if row is None:
+        raise RuntimeError("SELECT VERSION() returned no row")
+    version, version_comment, charset, collation, lctn, sql_mode = row
     return SnapshotMeta(
         server_version=str(version),
         version_comment=str(version_comment),
@@ -209,7 +212,10 @@ def capture_snapshot(params: MysqlParams, database_names: list[str], *, sample_r
 
 def _read_table_ddl(cursor: pymysql.cursors.Cursor, db_name: str, table_name: str) -> str:
     cursor.execute(f"SHOW CREATE TABLE {quote_ident(db_name)}.{quote_ident(table_name)}")
-    return str(cursor.fetchone()[1])
+    row = cursor.fetchone()
+    if row is None:
+        raise RuntimeError(f"SHOW CREATE TABLE returned no row for {db_name}.{table_name}")
+    return str(row[1])
 
 
 def _read_columns(cursor: pymysql.cursors.Cursor, db_name: str, table_name: str) -> list[ColumnDef]:

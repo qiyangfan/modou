@@ -15,7 +15,6 @@ from fastmcp.exceptions import ToolError
 from modou import __version__
 from modou.ai.client import config_from_env
 from modou.changeset.pack import ChangesetValidationError, pack_changeset
-from modou.diff.pipeline import VerifyInputError, VerifyOutcome, run_verify
 from modou.optimize.pipeline import run_optimize
 from modou.params import PasswordUnavailableError, resolve_params
 from modou.replay.splitter import split_statements
@@ -23,6 +22,7 @@ from modou.report.opinions import AiOpinion
 from modou.server.surface_map import EVIDENCE_PRIMITIVES, EXCLUDED_COMMANDS, cli_command_map
 from modou.snapshot.capture import capture_to_file
 from modou.snapshot.model import Snapshot, snapshot_from_json
+from modou.verify import VerifyInputError, VerifyOutcome, run_verify
 
 
 def build_mcp_server() -> FastMCP:
@@ -359,7 +359,7 @@ def _register_patrol_unused_indexes(mcp: FastMCP, command_help: dict[str, str], 
             raise ToolError("observe_days must be >= 1")
         if dsn is not None:
             usages, uptime = _live_usages(dsn, database, host, port, user, password, observe_days)
-            redundancies: list = []
+            redundancies: list[Any] = []
         elif snapshot is not None:
             usages = []
             uptime = None
@@ -380,7 +380,7 @@ def _live_usages(
     user: str | None,
     password: str | None,
     observe_days: int,
-) -> tuple[list, int | None]:
+) -> tuple[list[Any], int | None]:
     from modou.patrol.unused_indexes import (
         PerformanceSchemaDisabledError,
         collect_from_live,
@@ -398,7 +398,7 @@ def _live_usages(
     except Exception as exc:
         # 建连失败必须转成工具错误，否则会被 mask 成无信息文案
         raise ToolError(f"unused-indexes failed: {exc}") from exc
-    usages: list = []
+    usages: list[Any] = []
     uptime: int | None = None
     try:
         for db_name in dict.fromkeys(database):
@@ -415,14 +415,14 @@ def _live_usages(
     return usages, uptime
 
 
-def _snapshot_redundancies(snapshot: str) -> list:
+def _snapshot_redundancies(snapshot: str) -> list[Any]:
     from modou.patrol.unused_indexes import find_redundant_from_inventory
 
     try:
         snapshot_data = snapshot_from_json(Path(snapshot).read_text(encoding="utf-8"))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise ToolError(f"cannot load snapshot: {exc}") from exc
-    redundancies: list = []
+    redundancies: list[Any] = []
     for inventory in snapshot_data.databases.values():
         redundancies.extend(find_redundant_from_inventory(inventory))
     return redundancies
@@ -467,11 +467,11 @@ def _register_patrol_summarize(mcp: FastMCP, command_help: dict[str, str]) -> No
         from modou.patrol.summary import SummaryInputError, summarize_reports
         from modou.report.opinions import attach_ai_opinions
 
-        def _load(path: str | None) -> dict | None:
+        def _load(path: str | None) -> dict[str, Any] | None:
             if path is None:
                 return None
             try:
-                return json.loads(Path(path).read_text(encoding="utf-8"))
+                return dict(json.loads(Path(path).read_text(encoding="utf-8")))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise ToolError(f"cannot load patrol report: {exc}") from exc
 

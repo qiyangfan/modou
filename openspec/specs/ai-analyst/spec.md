@@ -1,6 +1,7 @@
 # ai-analyst Specification
 
 ## Purpose
+
 确定性工程当裁判、AI 当分析师（ADR-0009）：确定性流水线预取证据并驱动对 AI
 分析能力的受控调用（lint 残留评审、verify 失败归因、patrol 跨信号叙事、optimize
 候选生成），产物与确定性结论两级标注（实证已验证 / AI 观点），AI 观点单列展示且

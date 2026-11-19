@@ -92,7 +92,7 @@ class TestRulePositiveNegative:
 
 
 class TestEngineBehaviors:
-    def test_unparseable_statement_recorded_and_audit_continues(self, tmp_path) -> None:
+    def test_unparsable_statement_recorded_and_audit_continues(self, tmp_path) -> None:
         """版本注释语句解析失败时记录 PARSE.001，并继续审核后续语句。"""
         f = tmp_path / "cond.sql"
         f.write_text(
@@ -111,7 +111,7 @@ class TestEngineBehaviors:
         assert any(h.rule_id == "CLA.015" for h in result.hits)
         assert result.exit_code == 1
 
-    def test_unparseable_hit_position_and_skip(self, tmp_path) -> None:
+    def test_unparsable_hit_position_and_skip(self, tmp_path) -> None:
         f = tmp_path / "bad.sql"
         # 引号不闭合才会抛 ParseError；sqlglot 会把未知词解析成标识符
         f.write_text("SELECT 1;\nSELECT 'unclosed;\n", encoding="utf-8")

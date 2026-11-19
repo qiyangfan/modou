@@ -18,12 +18,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: gitleaks
         run: |
           VERSION=8.30.1
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
             | tar -xz -C /usr/local/bin gitleaks
           gitleaks detect --source . --redact --verbose --exit-code 1
+
+  # 依赖漏洞扫描：Python 走 PyPI 公告库，Node 走 npm audit（high 及以上即失败）。
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen
+      # 本项目自身是可编辑安装，PyPI 上没有对应发布物，跳过只审计第三方依赖。
+      - run: uv run pip-audit --skip-editable
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+      - run: npm ci --prefix ui
+      - run: npm audit --prefix ui --audit-level=high
