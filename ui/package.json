@@ -18,7 +18,7 @@
     "docs:check": "markdownlint-cli2",
     "docs:format:check": "prettier --check \"../README.md\" \"../README.en.md\" \"../AGENTS.md\" \"../docs/**/*.md\" \"../.github/**/*.yml\" \"../openspec/**/*.md\" \"../openspec/**/*.yaml\" \"../examples/ci/*.yml\" \"../.pre-commit-config.yaml\" \"../.yamllint.yml\"",
     "dead:check": "knip --include exports,files,dependencies",
-    "size:check": "size-limit",
+    "size:check": "vite build && size-limit",
     "e2e": "npm run build && playwright test"
   },
   "devDependencies": {

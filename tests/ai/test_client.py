@@ -6,7 +6,7 @@ import http.client
 
 import pytest
 
-from modou.ai.client import AiCallError, AiConfig, complete, default_transport
+from modou.ai.client import AiCallError, AiConfig, _validate_endpoint, complete, default_transport
 
 
 def _config() -> AiConfig:
@@ -78,8 +78,15 @@ def test_ai_call_error_identity_preserved_after_retries() -> None:
 
 
 def test_plaintext_endpoint_is_rejected() -> None:
-    """密钥随请求头发送，非 https 端点必须在发请求前拒绝。"""
-    with pytest.raises(AiCallError, match="must be https"):
-        default_transport("http://127.0.0.1:8080/v1/chat", "k", {}, 1.0)
-    with pytest.raises(AiCallError, match="must be https"):
+    """密钥随请求头发送，非 https 且非回环的端点必须在发请求前拒绝。"""
+    with pytest.raises(AiCallError, match="must be https or loopback http"):
+        default_transport("http://api.example.com/v1/chat", "k", {}, 1.0)
+    with pytest.raises(AiCallError, match="must be https or loopback http"):
         default_transport("file:///etc/passwd", "k", {}, 1.0)
+
+
+def test_loopback_http_endpoint_is_allowed() -> None:
+    """本地 Ollama/vLLM 等 BYOK 端点常为回环 http，必须放行。"""
+    _validate_endpoint("http://127.0.0.1:11434/v1/chat")
+    _validate_endpoint("http://localhost:8000/v1/chat")
+    _validate_endpoint("http://[::1]:11434/v1/chat")

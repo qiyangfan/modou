@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import urllib.parse
@@ -54,17 +55,36 @@ def config_from_env(env: Mapping[str, str]) -> AiConfig | None:
     return AiConfig(base_url=base_url, api_key=api_key, model=model)
 
 
+def _is_loopback(host: str | None) -> bool:
+    """本机回环地址允许 http(BYOK 本地 Ollama/vLLM 的常见形态,数据不出主机)。"""
+    if host is None:
+        return False
+    if host in {"localhost", "::1"}:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _validate_endpoint(url: str) -> None:
+    """密钥随请求头明文发送:非 https 仅对回环主机放行。"""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme == "https" and parts.netloc:
+        return
+    if parts.scheme == "http" and parts.netloc and _is_loopback(parts.hostname):
+        return
+    raise AiCallError(f"AI endpoint must be https or loopback http, got: {url}")
+
+
 def default_transport(url: str, api_key: str, payload: dict[str, Any], timeout: float) -> dict[str, object]:
     """用标准库调用 OpenAI 兼容端点。"""
-    parts = urllib.parse.urlsplit(url)
-    if parts.scheme != "https" or not parts.netloc:
-        # 密钥随请求头明文发送，非 https 端点一律拒绝。
-        raise AiCallError(f"AI endpoint must be https, got: {url}")
+    _validate_endpoint(url)
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-    # 端点已限定为 https，但 request 不携带 scheme，bandit 无从判断；头只含本次密钥。
+    # 端点已校验:https 或回环 http;request 不携带 scheme,bandit 无从判断。
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")  # noqa: S310
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310  仅 https 端点
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310  仅 https/回环
         body = response.read()
     try:
         return dict(json.loads(body.decode("utf-8")))

@@ -2,7 +2,7 @@
   {
     "name": "entry bundle (js+css)",
     "path": ["dist/assets/index-*.js", "dist/assets/index-*.css"],
-    "limit": "8 kB"
+    "limit": "6 kB"
   },
   {
     "name": "html shell",

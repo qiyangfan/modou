@@ -77,7 +77,11 @@ class TestCaptureToFile:
         result = capture_to_file(_params(monkeypatch, conn), ["shop"], out, sample_rows=10)
 
         assert result is expected
-        assert seen == {"params": seen["params"], "names": ["shop"], "sample_rows": 10}
+        assert seen["names"] == ["shop"]
+        assert seen["sample_rows"] == 10
+        params = seen["params"]
+        assert isinstance(params, MysqlParams)
+        assert params.host == "127.0.0.1"
         assert out.read_text(encoding="utf-8").strip().startswith("{")
 
 

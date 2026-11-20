@@ -65,7 +65,7 @@ jobs:
       # YAML 语义检查：workflow、dependabot、openspec 与根级配置。
       - run: uv run yamllint -f parsable .github openspec examples/ci/pack-gate.yml .pre-commit-config.yaml .yamllint.yml
       # 覆盖率门禁：分支覆盖，阈值 80 取自 pyproject（[tool.coverage.report] fail_under），
-      # CI 与本地同源；集成用例默认跳过，阈值按离线基线，本机全量实测 88.72%。
+      # CI 与本地同源；集成用例默认跳过，阈值按离线基线，本机全量实测 81.45%。
       - run: uv run pytest -q --cov=modou --cov-report=term
       - name: CLI 冒烟
         run: uv run modou --help
