@@ -27,6 +27,13 @@ htmlcov/
 # 系统
 .DS_Store
 
+# SBOM（CI 生成后作为 artifact 留存，不入库）
+sbom.cdx.json
+
+# Playwright 端到端产物
+ui/test-results/
+ui/playwright-report/
+
 
 # HANDOFF 仅本地维护,不入库(开源准备)
 docs/HANDOFF.md

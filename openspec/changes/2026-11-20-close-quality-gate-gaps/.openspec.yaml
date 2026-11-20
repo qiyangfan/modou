@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-20
+goal: 补齐 Python 安全规则、覆盖率与供应链门禁，UI 体积/e2e 收口
+skip_specs: true

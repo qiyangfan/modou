@@ -29,7 +29,7 @@ uv run deptry .                  # 依赖卫生（未使用 / 缺失 / 传递）
 uv run vulture src tests --min-confidence 100   # 死代码（100% 置信度）
 uv run codespell                 # 拼写
 uv run yamllint -f parsable .github openspec examples/ci/pack-gate.yml .pre-commit-config.yaml .yamllint.yml
-uv run pytest --cov=modou --cov-fail-under=80   # 测试 + 行覆盖率（警告即错误）
+uv run pytest --cov=modou   # 测试 + 覆盖率（分支统计，阈值 80 见 pyproject；警告即错误；单测 300s 超时）
 uv run pip-audit --skip-editable # 依赖漏洞（PyPI 公告库）
 uv run modou --help              # CLI 冒烟
 uv build && uv run python -c 'import glob,os,zipfile; w=max(glob.glob("dist/*.whl"),key=os.path.getmtime); assert any(n.startswith("modou/ui/dist/") for n in zipfile.ZipFile(w).namelist()); print(w)'   # 打包并校验 wheel 含 UI 资源
@@ -39,6 +39,7 @@ npx --yes @fission-ai/openspec@1 validate --all --strict   # spec 严格校验
 taplo fmt --check pyproject.toml .gitleaks.toml && taplo lint pyproject.toml .gitleaks.toml   # TOML
 npm audit --prefix ui --audit-level=high         # 依赖漏洞（high 及以上）
 (cd ui && npm run typecheck && npm run lint && npm run format:check && npm run style:check && npm run dup:check && npm run arch:check && npm run docs:check && npm run docs:format:check && npm run dead:check && npm test)
+(cd ui && npm run size:check && npx playwright install chromium && npm run e2e)   # 体积门禁（brotli）+ 浏览器冒烟/axe
 ```
 
 ## 代码规范
@@ -46,6 +47,8 @@ npm audit --prefix ui --audit-level=high         # 依赖漏洞（high 及以上
 - Python 3.12+，新增代码必须带类型注解；`uv run mypy src/modou` 已进 CI 门禁（strict，只约束生产代码）。
 - 中文注释、中文文档、中文提交信息；日志与 CLI 错误文本用英文。
 - sqlglot 是唯一 SQL 解析器，禁止引入第二套解析依赖。
+- ruff 已启用 bandit 规则（`S`）：新增告警要么修，要么行内 `# noqa: S<code>` 注明原因，禁止全局关闭。
+- 许可证 allowlist 在 `.grant.yaml`（默认 deny-all）；新增依赖引入强 copyleft 必须在此裁决并注明理由。
 - 回放/diff/优化类任务**测试先行**：先写失败测试再实现（openspec rules 同源）。
 - 重依赖（容器编排、AI SDK）只准放 `[project.optional-dependencies]`。
 - 业务逻辑只准落在内核库；CLI 与 MCP 表面层只做参数解析与展示（ADR-0002）。

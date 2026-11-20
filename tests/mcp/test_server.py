@@ -137,10 +137,14 @@ class TestStdioOnly:
 
 def _listening_ports() -> set[str]:
     import os
+    import shutil
     import subprocess
 
-    result = subprocess.run(
-        ["lsof", "-nP", "-i", "-a", "-p", str(os.getpid())],
+    # 先解析绝对路径再执行，避免按 PATH 相对名启动进程。
+    lsof = shutil.which("lsof")
+    assert lsof is not None, "caller must skip without lsof"
+    result = subprocess.run(  # noqa: S603  固定命令与 PID，无外部输入
+        [lsof, "-nP", "-i", "-a", "-p", str(os.getpid())],
         capture_output=True,
         text=True,
         timeout=30,

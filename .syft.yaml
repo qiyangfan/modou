@@ -1,0 +1,11 @@
+# SBOM 扫描排除物：VCS 元数据与构建产物。
+# 保留 .venv 与 ui/node_modules：许可证元数据只存在于已安装的包信息中。
+exclude:
+  - "./.git/**"
+  - "./dist/**"
+  - "./ui/dist/**"
+  - "./ui/coverage/**"
+  - "./.mypy_cache/**"
+  - "./.pytest_cache/**"
+  - "./.ruff_cache/**"
+  - "./.import_linter_cache/**"

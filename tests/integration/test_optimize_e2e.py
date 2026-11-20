@@ -76,7 +76,7 @@ class TestOptimizeShadowE2E:
 
         restore_snapshot(mysql_conn, first, database_filter={target_db}, include_data=True)
         with mysql_conn.cursor() as cursor:
-            cursor.execute(f"SELECT COUNT(*) FROM `{target_db}`.`orders`")
+            cursor.execute(f"SELECT COUNT(*) FROM `{target_db}`.`orders`")  # noqa: S608  库名由测试生成
             assert cursor.fetchone()[0] == 500
 
     def test_effective_index_measured(self, mysql_server, mysql_conn) -> None:
@@ -200,7 +200,7 @@ def test_generated_column_sampling_roundtrip(mysql_server) -> None:
         try:
             restore_snapshot(shadow_conn, snapshot, database_filter={target}, include_data=True)
             with shadow_conn.cursor() as cursor:
-                cursor.execute(f"SELECT COUNT(*) FROM `{target}`.`t`")
+                cursor.execute(f"SELECT COUNT(*) FROM `{target}`.`t`")  # noqa: S608  库名由测试生成
                 assert cursor.fetchone()[0] == 10
         finally:
             shadow_conn.close()

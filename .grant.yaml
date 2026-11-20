@@ -1,0 +1,41 @@
+# 许可证 allowlist（默认 deny-all）。只列宽松/弱 copyleft 许可，
+# 强 copyleft（GPL/AGPL/SSPL）不在其中即被拒绝。
+allow:
+  - MIT
+  - Apache-2.0
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - ISC
+  - 0BSD
+  - Unlicense
+  - CC0-1.0
+  - MPL-2.0
+  - PSF-2.0
+  - Zlib
+  - MIT-0
+  - CNRI-Python
+  - Unicode-3.0
+  # 双许可表达式：任一支在 allowlist 内即视为合规。
+  - Apache-2.0 OR BSD-3-Clause
+  - Apache-2.0 OR BSD-2-Clause
+  # 以下为包元数据中的非 SPDX 自由文本写法，均为宽松许可（与上面同义）。
+  - PSFL                    # defusedxml
+  - Expat license           # mccabe（即 MIT）
+  - ISC License             # shellingham
+  - BSD                     # nodeenv
+  - BSD 2-Clause License    # grimp / import-linter
+  - Apache 2.0              # sortedcontainers
+
+# uv.lock / package-lock.json 不携带许可证元数据，SBOM 中相应组件无 license 字段；
+# 这类未知项跳过（SBOM 仍作为 artifact 留存供审计），已知许可证照常执行 allowlist。
+require-license: false
+require-known-license: false
+
+# 仅构建期/开发期工具，均不进入 wheel 发布产物，且无宽松替代。
+# 复核到期日：2027-06-30（到期前替换或重新裁决）。
+ignore-packages:
+  - codespell   # GPL-2.0-only；拼写检查
+  - pylint      # GPL-2.0-or-later；复杂度/规模门禁
+  - astroid     # LGPL-2.1-or-later；pylint 依赖
+  - yamllint    # GPL-3.0-or-later；YAML 检查
+  - exceptiongroup  # 元数据许可证为 hash 引用，无法识别；仅旧版 Python 回填用

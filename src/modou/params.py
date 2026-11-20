@@ -13,7 +13,7 @@ import typer
 
 from modou.db import MysqlParams
 
-PASSWORD_ENV = "MOUDO_MYSQL_PASSWORD"
+PASSWORD_ENV = "MOUDO_MYSQL_PASSWORD"  # noqa: S105  环境变量名，非口令值
 
 
 class PasswordUnavailableError(Exception):

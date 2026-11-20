@@ -72,7 +72,8 @@ def _restore_table_sample(
     placeholders = ", ".join(["%s"] * len(sample.columns))
     column_list = ", ".join(quote_ident(name) for name in sample.columns)
     target = f"{quote_ident(db_name)}.{quote_ident(table.name)}"
-    sql = f"INSERT INTO {target} ({column_list}) VALUES ({placeholders})"
+    # 表与列名经 quote_ident 反引号转义，值全部由 %s 占位符绑定。
+    sql = f"INSERT INTO {target} ({column_list}) VALUES ({placeholders})"  # noqa: S608
     for start in range(0, len(sample.rows), _INSERT_BATCH_ROWS):
         batch = []
         for row in sample.rows[start : start + _INSERT_BATCH_ROWS]:

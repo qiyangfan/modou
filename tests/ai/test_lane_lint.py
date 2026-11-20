@@ -17,7 +17,8 @@ def _config() -> AiConfig:
 
 def _units(*subjects: str) -> list[StatementUnit]:
     return [
-        StatementUnit(file=s.split(":")[0], line=int(s.split(":")[1]), sql=f"SELECT {i} FROM t")
+        # 序号来自本函数参数，非外部输入。
+        StatementUnit(file=s.split(":")[0], line=int(s.split(":")[1]), sql=f"SELECT {i} FROM t")  # noqa: S608
         for i, s in enumerate(subjects)
     ]
 

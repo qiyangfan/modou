@@ -130,7 +130,7 @@ def test_pack_invalid_target_major_exit_two(tmp_path: Path) -> None:
 def test_pack_stdout_is_pure_sql_when_redirected(tmp_path: Path) -> None:
     """stdout 只允许 SQL 产物，预警一律走 stderr。"""
     changeset = make_changeset(tmp_path / "cs", {"V01__drop.sql": "DROP TABLE old_t;"}, ["V01__drop.sql"])
-    proc = subprocess.run(
+    proc = subprocess.run(  # noqa: S603  子进程参数由测试构造，无外部输入
         [sys.executable, "-m", "modou.cli", "pack", str(changeset)],
         capture_output=True,
         text=True,

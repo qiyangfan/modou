@@ -49,3 +49,69 @@ jobs:
           node-version: 24
       - run: npm ci --prefix ui
       - run: npm audit --prefix ui --audit-level=high
+
+  # 锁定文件漏洞扫描：与包管理器审计互补，覆盖 Python/Node 锁文件的完整依赖图。
+  osv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: osv-scanner
+        run: |
+          VERSION=2.7.1
+          curl -sSfL "https://github.com/google/osv-scanner/releases/download/v${VERSION}/osv-scanner_linux_amd64" \
+            -o ./osv-scanner
+          chmod +x ./osv-scanner
+          ./osv-scanner scan source -r .
+
+  # SBOM 与许可证合规：生成 CycloneDX 制品并留存，allowlist 之外（默认 deny-all）
+  # 的许可证直接失败。开发期工具的无宽松替代豁免见 .grant.yaml。
+  sbom:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # 许可证元数据只存在于已安装的包信息中，必须先装好依赖。
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+      - run: npm ci --prefix ui
+      - name: 安装 syft
+        run: |
+          set -euo pipefail
+          VERSION=1.57.2
+          ASSET="syft_${VERSION}_linux_amd64.tar.gz"
+          BASE="https://github.com/anchore/syft/releases/download/v${VERSION}"
+          curl -sSfL "${BASE}/${ASSET}" -o "/tmp/${ASSET}"
+          curl -sSfL "${BASE}/syft_${VERSION}_checksums.txt" -o /tmp/syft.sha256
+          # 校验和与产物同源发布：拦下载损坏与发布元数据不一致。
+          (cd /tmp && sha256sum -c <(grep "  ${ASSET}\$" syft.sha256))
+          tar -xz -C /usr/local/bin -f "/tmp/${ASSET}" syft
+      - name: 生成 SBOM（CycloneDX）
+        run: syft scan dir:. -c .syft.yaml -o cyclonedx-json=sbom.cdx.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          retention-days: 30
+      - name: 安装 grant
+        run: |
+          set -euo pipefail
+          VERSION=0.8.0
+          ASSET="grant_${VERSION}_linux_amd64.tar.gz"
+          BASE="https://github.com/anchore/grant/releases/download/v${VERSION}"
+          curl -sSfL "${BASE}/${ASSET}" -o "/tmp/${ASSET}"
+          curl -sSfL "${BASE}/grant_${VERSION}_checksums.txt" -o /tmp/grant.sha256
+          (cd /tmp && sha256sum -c <(grep "  ${ASSET}\$" grant.sha256))
+          tar -xz -C /usr/local/bin -f "/tmp/${ASSET}" grant
+      - name: 许可证策略（allowlist；强 copyleft 即阻断）
+        run: grant check sbom.cdx.json

@@ -121,7 +121,7 @@ class TestCandidateDedupAndCoverage:
 
     def test_candidate_capped(self) -> None:
         conditions = " AND ".join([f"col_{i} = {i}" for i in range(20)])
-        analysis = analyze_statement(f"SELECT * FROM wide WHERE {conditions}", "shop")
+        analysis = analyze_statement(f"SELECT * FROM wide WHERE {conditions}", "shop")  # noqa: S608  取值来自 range()
         assert len(analysis.candidates) <= 5
 
     def test_covered_by_existing_index(self) -> None:

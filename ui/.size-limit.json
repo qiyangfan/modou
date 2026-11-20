@@ -1,0 +1,12 @@
+[
+  {
+    "name": "entry bundle (js+css)",
+    "path": ["dist/assets/index-*.js", "dist/assets/index-*.css"],
+    "limit": "8 kB"
+  },
+  {
+    "name": "html shell",
+    "path": "dist/index.html",
+    "limit": "1 kB"
+  }
+]

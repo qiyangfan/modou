@@ -42,6 +42,9 @@ class TestUiCli:
         assert "supported reports" in result.output
 
     def test_non_loopback_bind_exit_2(self, tmp_path) -> None:
-        result = runner.invoke(app, ["ui", "--report", str(_verify_file(tmp_path)), "--bind", "0.0.0.0", "--no-open"])
+        result = runner.invoke(
+            app,
+            ["ui", "--report", str(_verify_file(tmp_path)), "--bind", "0.0.0.0", "--no-open"],  # noqa: S104  断言被拒
+        )
         assert result.exit_code == 2
         assert "loopback" in result.output

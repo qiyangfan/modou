@@ -81,7 +81,8 @@ def build_sample_sql(database: str, table: TableDef, *, limit: int) -> str:
     order = ", ".join(quote(part) + " ASC" for part in key_parts)
     db = quote(database)
     tbl = quote(table.name)
-    return f"SELECT {columns} FROM {db}.{tbl} ORDER BY {order} LIMIT {int(limit)}"
+    # 库/表/列名均经 quote 反引号转义，limit 强转整数，无外部取值。
+    return f"SELECT {columns} FROM {db}.{tbl} ORDER BY {order} LIMIT {int(limit)}"  # noqa: S608
 
 
 def build_index_prefix(column_type: str) -> str:

@@ -14,6 +14,11 @@ from modou.ui import ReportLoadError, load_report, run_ui
 from modou.ui.server import UiBindError
 
 
+def _open(url, timeout: float = 10):
+    """请求本文件构造的本地回环 URL；边界路径另行断言。"""
+    return urllib.request.urlopen(url, timeout=timeout)  # noqa: S310
+
+
 def _write_report(tmp_path: Path, name: str, payload: dict) -> Path:
     f = tmp_path / name
     f.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -80,7 +85,7 @@ class TestBindGuard:
     def test_non_loopback_rejected(self, tmp_path) -> None:
         f = _write_report(tmp_path, "v.json", VERIFY_OK)
         with pytest.raises(UiBindError, match="loopback"):
-            run_ui([f], bind="0.0.0.0", open_browser=False)
+            run_ui([f], bind="0.0.0.0", open_browser=False)  # noqa: S104  断言绑定守卫拒绝
 
 
 class TestServerE2E:
@@ -92,20 +97,20 @@ class TestServerE2E:
         assert server.server_address[0] == "127.0.0.1"
         try:
             # 报告清单端点
-            with urllib.request.urlopen(f"{base}/api/reports", timeout=10) as response:
+            with _open(f"{base}/api/reports", timeout=10) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             assert payload["reports"][0]["kind"] == "verify"
             # 报告数据端点；id 是绝对路径，非 ASCII 由编码测试覆盖
             report_id = payload["reports"][0]["id"]
-            with urllib.request.urlopen(f"{base}/api/reports/{report_id}", timeout=10) as response:
+            with _open(f"{base}/api/reports/{report_id}", timeout=10) as response:
                 data = json.loads(response.read().decode("utf-8"))
             assert data["data"]["exit_code"] == 0
             # 页面与静态资源
-            with urllib.request.urlopen(base + "/", timeout=10) as response:
+            with _open(base + "/", timeout=10) as response:
                 assert b'<div id="app">' in response.read()
             # 未知报告 id → 404
             try:
-                urllib.request.urlopen(f"{base}/api/reports/nonexistent", timeout=10)
+                _open(f"{base}/api/reports/nonexistent", timeout=10)
                 raise AssertionError("expected 404")
             except urllib.error.HTTPError as exc:
                 assert exc.code == 404
@@ -139,12 +144,12 @@ class TestReviewRegressions:
         server, _reports = run_ui([f], port=0, bind="127.0.0.1", open_browser=False)
         base = f"http://127.0.0.1:{server.server_address[1]}"
         try:
-            with urllib.request.urlopen(f"{base}/api/reports", timeout=10) as response:
+            with _open(f"{base}/api/reports", timeout=10) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             report_id = payload["reports"][0]["id"]
             assert "中文" in report_id
             encoded = urllib.parse.quote(report_id, safe="")
-            with urllib.request.urlopen(f"{base}/api/reports/{encoded}", timeout=10) as response:
+            with _open(f"{base}/api/reports/{encoded}", timeout=10) as response:
                 data = json.loads(response.read().decode("utf-8"))
             assert data["data"]["exit_code"] == 0
         finally:
@@ -157,10 +162,10 @@ class TestReviewRegressions:
         server, _reports = run_ui([f], port=0, bind="127.0.0.1", open_browser=False)
         base = f"http://127.0.0.1:{server.server_address[1]}"
         try:
-            req = urllib.request.Request(f"{base}/api/reports")
+            req = urllib.request.Request(f"{base}/api/reports")  # noqa: S310  本地回环
             req.add_header("Host", "evil.example.com")
             try:
-                urllib.request.urlopen(req, timeout=10)
+                _open(req, timeout=10)
                 raise AssertionError("expected 403")
             except urllib.error.HTTPError as exc:
                 assert exc.code == 403
@@ -181,7 +186,7 @@ class TestReviewRegressions:
                 "//etc/passwd",
             ):
                 try:
-                    urllib.request.urlopen(f"{base}{path}", timeout=10)
+                    _open(f"{base}{path}", timeout=10)
                     raise AssertionError(f"expected 404 for {path}")
                 except urllib.error.HTTPError as exc:
                     assert exc.code == 404, path

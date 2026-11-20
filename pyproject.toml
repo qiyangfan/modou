@@ -30,6 +30,7 @@ dev = [
   "pylint>=3.3",
   "pytest>=8.0",
   "pytest-cov>=7.1.0",
+  "pytest-timeout>=2.3",
   "ruff>=0.6",
   "types-pymysql>=1.2.4.20261116",
   "vulture>=2.16",
@@ -79,11 +80,14 @@ select = [
   "T10",     # 禁止调试断点
   "T20",     # 禁止 print
   "N",       # 命名规范（pep8-naming）
+  "S",       # bandit 安全规则
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # Typer 通过函数默认值声明 CLI 参数；B008 在该文件是框架用法而非缺陷。
 "src/modou/cli.py" = ["B008"]
+# 测试用例依赖 assert 做断言，硬编码口令与绑定地址是夹具常量。
+"tests/**" = ["S101", "S105", "S106", "S107"]
 
 [tool.importlinter]
 root_packages = ["modou"]
@@ -149,6 +153,22 @@ per_rule_ignores = { DEP002 = ["cryptography"] }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# 单测超时熔断：应用代码超时设为 60s 时此处不应误伤，只拦挂死用例。
+timeout = 300
 # 警告即错误：弃用 API 与资源泄漏在门禁中直接失败。
 filterwarnings = ["error"]
 markers = ["needs_byok_env: 保留真实 BYOK 环境变量（评测门禁专用，其余用例默认剥离）"]
+
+# 覆盖率口径：与 CI 的 `--cov=modou` 同源，分支覆盖一并统计。
+# fail_under 取实测基线向下取整（2026-11-20 行覆盖 81%，CI 同款离线用例）。
+[tool.coverage.run]
+source = ["modou"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+
+[tool.coverage.html]
+directory = "htmlcov"

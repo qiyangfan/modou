@@ -10,7 +10,8 @@ from modou.lint.rules import get_rule
 POSITIVE_CASES: dict[str, str] = {
     "ARG.001": "SELECT * FROM users WHERE name LIKE '%zh'",
     "ARG.004": "SELECT * FROM t WHERE a IN (1, NULL)",
-    "ARG.005": "SELECT * FROM t WHERE a IN (" + ", ".join(str(i) for i in range(101)) + ")",
+    # 生成长 IN 列表以命中规则，取值来自 range() 而非外部输入。
+    "ARG.005": "SELECT * FROM t WHERE a IN (" + ", ".join(str(i) for i in range(101)) + ")",  # noqa: S608
     "ARG.006": "SELECT * FROM t WHERE a IS NULL",
     "ARG.011": "SELECT * FROM t WHERE a NOT IN (1, 2)",
     "CLA.001": "SELECT id FROM orders",

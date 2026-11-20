@@ -34,7 +34,7 @@ class TestPatrolShadowE2E:
         db = unique_db("patrol")
         _setup(mysql_conn, db)
         with mysql_conn.cursor() as cursor:
-            cursor.execute(f"SELECT * FROM `{db}`.`t` FORCE INDEX (idx_a) WHERE a = 5 LIMIT 10")
+            cursor.execute(f"SELECT * FROM `{db}`.`t` FORCE INDEX (idx_a) WHERE a = 5 LIMIT 10")  # noqa: S608
             cursor.fetchall()
         mysql_conn.commit()
 

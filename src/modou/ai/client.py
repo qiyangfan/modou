@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -55,13 +56,15 @@ def config_from_env(env: Mapping[str, str]) -> AiConfig | None:
 
 def default_transport(url: str, api_key: str, payload: dict[str, Any], timeout: float) -> dict[str, object]:
     """用标准库调用 OpenAI 兼容端点。"""
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or not parts.netloc:
+        # 密钥随请求头明文发送，非 https 端点一律拒绝。
+        raise AiCallError(f"AI endpoint must be https, got: {url}")
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+    # 端点已限定为 https，但 request 不携带 scheme，bandit 无从判断；头只含本次密钥。
+    request = urllib.request.Request(url, data=body, headers=headers, method="POST")  # noqa: S310
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310  仅 https 端点
         body = response.read()
     try:
         return dict(json.loads(body.decode("utf-8")))

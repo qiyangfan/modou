@@ -6,7 +6,7 @@ import http.client
 
 import pytest
 
-from modou.ai.client import AiCallError, AiConfig, complete
+from modou.ai.client import AiCallError, AiConfig, complete, default_transport
 
 
 def _config() -> AiConfig:
@@ -75,3 +75,11 @@ def test_ai_call_error_identity_preserved_after_retries() -> None:
     with pytest.raises(AiCallError) as exc_info:
         complete(_config(), {}, transport=transport)
     assert exc_info.value is error
+
+
+def test_plaintext_endpoint_is_rejected() -> None:
+    """密钥随请求头发送，非 https 端点必须在发请求前拒绝。"""
+    with pytest.raises(AiCallError, match="must be https"):
+        default_transport("http://127.0.0.1:8080/v1/chat", "k", {}, 1.0)
+    with pytest.raises(AiCallError, match="must be https"):
+        default_transport("file:///etc/passwd", "k", {}, 1.0)

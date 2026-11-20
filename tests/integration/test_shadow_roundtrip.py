@@ -98,7 +98,7 @@ def test_restore_roundtrip_full_fidelity(mysql_conn: pymysql.connections.Connect
     _create_rich_schema(mysql_conn, db_name)
     # 先制造 AUTO_INCREMENT 漂移再采集：计数器是运行时状态，不应影响结构等价
     with mysql_conn.cursor() as cursor:
-        cursor.execute(f"INSERT INTO {db_name}.t_inherit (name) VALUES ('a'), ('b')")
+        cursor.execute(f"INSERT INTO {db_name}.t_inherit (name) VALUES ('a'), ('b')")  # noqa: S608
     params = mysql_server_params(mysql_conn)
 
     original = capture_snapshot(params, [db_name])
@@ -167,11 +167,12 @@ def test_restore_resolves_cross_database_view_dependency(mysql_conn: pymysql.con
     """db1 视图引用 db2 视图时，灌入须在跨库依赖池中完成。"""
     db1, db2 = unique_db("modou_x1"), unique_db("modou_x2")
     with mysql_conn.cursor() as cursor:
+        # 库名由 unique_db 生成，不来自外部输入。
         cursor.execute(f"CREATE DATABASE {db2}")
         cursor.execute(f"CREATE TABLE {db2}.base (id INT PRIMARY KEY)")
-        cursor.execute(f"CREATE VIEW {db2}.v_base AS SELECT id FROM {db2}.base")
+        cursor.execute(f"CREATE VIEW {db2}.v_base AS SELECT id FROM {db2}.base")  # noqa: S608
         cursor.execute(f"CREATE DATABASE {db1}")
-        cursor.execute(f"CREATE VIEW {db1}.v_top AS SELECT id FROM {db2}.v_base")
+        cursor.execute(f"CREATE VIEW {db1}.v_top AS SELECT id FROM {db2}.v_base")  # noqa: S608
     params = mysql_server_params(mysql_conn)
 
     snapshot = capture_snapshot(params, [db1, db2])

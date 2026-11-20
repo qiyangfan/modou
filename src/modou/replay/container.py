@@ -66,7 +66,7 @@ class ShadowMySQL:
     def close(self) -> None:
         """销毁容器（幂等）。"""
         try:
-            subprocess.run(
+            subprocess.run(  # noqa: S603  参数为列表且 shell=False，无注入面
                 [self.cli, "rm", "-f", self.container_name],
                 capture_output=True,
                 timeout=60,
@@ -80,7 +80,7 @@ class ShadowMySQL:
 
     def _run_container(self) -> None:
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S603  参数为列表且 shell=False，无注入面
                 [
                     self.cli,
                     "run",
@@ -107,7 +107,7 @@ class ShadowMySQL:
 
     def _resolve_port(self) -> None:
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S603  参数为列表且 shell=False，无注入面
                 [self.cli, "port", self.container_name, "3306"],
                 capture_output=True,
                 text=True,
